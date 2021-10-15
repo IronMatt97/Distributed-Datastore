@@ -2,41 +2,35 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
-type Object struct {
-	key   string "json:'key'"
-	value string "json:'value'"
-}
-
-type ObjectResponse struct {
-	key   string `json:"key"`
-	value int    `json:"value"`
-}
-
 func read() {
 	fmt.Print("Inserisci il nome del file che vuoi leggere: ")
-	reader := bufio.NewReader(os.Stdin)
-	fileToRead, _ := reader.ReadString('\n')
+	fileToRead, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	fileToRead = fileToRead[0:len(fileToRead)-1] + "" //Ritaglia la stringa togliendo \n
 	response, err := http.Get("http://localhost:8000/get/" + fileToRead)
 	if err != nil {
-		fmt.Print(err.Error())
+		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
+		fmt.Println(err.Error())
 		return
 	}
-	responseData, err := ioutil.ReadAll(response.Body)
+	responseFromAPI, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("Failed acquiring API response.")
+		fmt.Println(err.Error())
+		return
 	}
-	fmt.Println(string(responseData))
+	fmt.Println(string(responseFromAPI))
 }
+
 func write() {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Inserisci il nome del file che vuoi scrivere: ")
@@ -45,34 +39,19 @@ func write() {
 	fmt.Print("Inserisci il contenuto del file che vuoi scrivere: ")
 	fileContent, _ := reader.ReadString('\n')
 	fileContent = fileContent[0:len(fileContent)-1] + "" //Ritaglia la stringa togliendo \n
-
-	//Necessary information marshaling to pass
-	/*var file Object
-	file.key = fileName
-	file.value = fileContent
-	fileJSON, err := json.Marshal(file)
-	fmt.Print("File JSON da inviare: ")
-	fmt.Println(fileJSON)
-	var o Object
-	err = json.Unmarshal([]byte(fileJSON), &o)
-	*/
-	emp_obj := Object{fileName, fileContent}
-	emp, _ := json.Marshal(emp_obj)
-	fmt.Println(string(emp))
-
-	rbytes := []byte(emp)
-	var res ObjectResponse
-	json.Unmarshal(rbytes, &res)
-
-	fmt.Println("DECRIPTATO: " + res.key)
-
-	//response, err := http.Post("http://localhost:8000/put", "application/json", bytes.NewBuffer(fileJSON))
-	/*if err != nil {
-		fmt.Println(err.Error())
-		fmt.Println("Client esploso")
+	if strings.Contains(fileName, "|") || strings.Contains(fileContent, "|") {
+		fmt.Println("Il carattere '|' non può essere inserito. ")
 		return
 	}
-	fmt.Println(response)*/
+	var request string = fileName + "|" + fileContent
+	requestJSON, _ := json.Marshal(request)
+	responseAPI, err := http.Post("http://localhost:8000/put", "application/json", bytes.NewBuffer(requestJSON))
+	if err != nil {
+		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
+		fmt.Println(err.Error())
+		return
+	}
+	fmt.Println(responseAPI)
 }
 
 func main() {

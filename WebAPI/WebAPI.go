@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -39,15 +40,15 @@ func put(w http.ResponseWriter, r *http.Request) {
 		fmt.Print("errore nella lettura della richiesta")
 		fmt.Println(err)
 	}
-	var fileName string
-	var fileContent string
-	fmt.Print("File JSON ricevuto: ")
-	fmt.Println(body)
-	err = json.Unmarshal([]byte(body), &Object{fileName, fileContent})
+	var receivedRequest string
+	err = json.Unmarshal([]byte(body), &receivedRequest)
 	if err != nil {
 		fmt.Println("Error unmarshaling data from request.")
 		return
 	}
+	var info []string = strings.Split(receivedRequest, "|")
+	var fileName string = info[0]
+	var fileContent string = info[1]
 	//Problema qui -- @TODO
 	fmt.Println("Sono arrivate all'api le seguenti stringhe: ")
 	fmt.Println("KEY: " + fileName)
