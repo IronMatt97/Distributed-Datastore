@@ -24,18 +24,18 @@ func get(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Richiesto file " + params["key"])
 	//Se non ci riesco ritorna un oggetto vuoto e l'errore
 	if err != nil {
+		fmt.Println("An error has occurred reading the file.")
 		fmt.Println(err)
-		json.NewEncoder(w).Encode(&Object{})
 		return
 	}
 	//Se ci riesco encoda un nuovo oggetto con titolo e contenuto
-	json.NewEncoder(w).Encode(Object{key: params["key"], value: string(data)})
+	fmt.Print(string(data))
+	json.NewEncoder(w).Encode(string(data))
 }
 
 func put(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
-	//Decoda il file che ti è appena arrivato
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := ioutil.ReadAll(r.Body) //Leggi la richiesta
 	if err != nil {
 		fmt.Print("errore nella lettura della richiesta")
 		fmt.Println(err)
@@ -49,23 +49,18 @@ func put(w http.ResponseWriter, r *http.Request) {
 	var info []string = strings.Split(receivedRequest, "|")
 	var fileName string = info[0]
 	var fileContent string = info[1]
-	//Problema qui -- @TODO
-	fmt.Println("Sono arrivate all'api le seguenti stringhe: ")
-	fmt.Println("KEY: " + fileName)
-	fmt.Println("VALUE: " + fileContent)
 
-	//Controlla che non ci sia già
-	data, err := ioutil.ReadFile(fileName) //Provo a leggere un file con titolo key letto in richiesta
+	//@@TODO----------- Controlla che non ci sia già
+	/*data, err := ioutil.ReadFile(fileName) //Provo a leggere un file con titolo key letto in richiesta
 	if os.IsExist(err) {
-		json.NewEncoder(w).Encode("Error: The file you want to create already exists. " + "Key: " + fileName + " Value: " + string(data))
+		json.NewEncoder(w).Encode("Error: The file you want to create already exists." )
 		return
-	}
+	}------------------------------*/
 
-	// the WriteFile method returns an error if unsuccessful
-	err2 := ioutil.WriteFile(fileName, []byte(fileContent), 0777)
-	// handle this error
-	if err2 != nil {
-		// print it out
+	//Scrittura effettiva del file
+	err = ioutil.WriteFile(fileName, []byte(fileContent), 0777)
+	if err != nil {
+		fmt.Println("An error has occurred writing the file. ")
 		fmt.Println(err)
 	}
 	json.NewEncoder(w).Encode("The object was successfully uploaded")
