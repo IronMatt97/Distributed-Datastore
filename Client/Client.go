@@ -8,23 +8,23 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/user"
 	"strings"
 	"time"
 )
 
 func read() {
-	fmt.Print("Inserisci il nome del file che vuoi leggere: ")
-	fileToRead, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	fileToRead = fileToRead[0:len(fileToRead)-1] + "" //Ritaglia la stringa togliendo \n
-	response, err := http.Get("http://localhost:8000/get/" + fileToRead)
+	fmt.Print("Name the file that you would like to read: ")
+	fileToRead := acquireString()
+	response, err := http.Get("http://localhost:8000/get/" + fileToRead) //Submitting a get request
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
 		return
 	}
-	responseFromAPI, err := ioutil.ReadAll(response.Body)
+	responseFromAPI, err := ioutil.ReadAll(response.Body) //Receiving http response
 	if err != nil {
-		fmt.Println("Failed acquiring API response.")
+		fmt.Println("An error has occurred trying to read the requested file.")
 		fmt.Println(err.Error())
 		return
 	}
@@ -32,55 +32,98 @@ func read() {
 }
 
 func write() {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Inserisci il nome del file che vuoi scrivere: ")
-	fileName, _ := reader.ReadString('\n')
-	fileName = fileName[0:len(fileName)-1] + "" //Ritaglia la stringa togliendo \n
-	fmt.Print("Inserisci il contenuto del file che vuoi scrivere: ")
-	fileContent, _ := reader.ReadString('\n')
-	fileContent = fileContent[0:len(fileContent)-1] + "" //Ritaglia la stringa togliendo \n
-	if strings.Contains(fileName, "|") || strings.Contains(fileContent, "|") {
-		fmt.Println("Il carattere '|' non può essere inserito. ")
+	fmt.Print("Insert the name of the file that you would like to create: ")
+	fileName := acquireString()
+	if isStringIllegal(fileName) {
 		return
 	}
-	var request string = fileName + "|" + fileContent
-	requestJSON, _ := json.Marshal(request)
-	responseAPI, err := http.Post("http://localhost:8000/put", "application/json", bytes.NewBuffer(requestJSON))
+	fmt.Print("Now write the content of the file that you would like to create: ")
+	fileContent := acquireString()
+	if isStringIllegal(fileContent) {
+		return
+	}
+	var request string = fileName + "|" + fileContent                                                         //Build the request in a particular format
+	requestJSON, _ := json.Marshal(request)                                                                   //Marshal the request
+	response, err := http.Post("http://localhost:8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
 		return
 	}
-	fmt.Println(responseAPI)
+	responseFromAPI, err := ioutil.ReadAll(response.Body) //Receiving http response
+	if err != nil {
+		fmt.Println("An error has occurred trying to read the requested file.")
+		fmt.Println(err.Error())
+		return
+	}
+	fmt.Println(string(responseFromAPI))
+}
+
+func del() {
+	fmt.Print("Insert the name of the file that you would like to delete: ")
+	fileToRemove := acquireString()
+	if isStringIllegal(fileToRemove) {
+		return
+	}
+	requestJSON, _ := json.Marshal(fileToRemove)
+	response, err := http.Post("http://localhost:8000/delete", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a delete request
+	if err != nil {
+		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
+		fmt.Println(err.Error())
+		return
+	}
+	responseFromAPI, err := ioutil.ReadAll(response.Body) //Receiving http response
+	if err != nil {
+		fmt.Println("An error has occurred trying to remove the requested file.")
+		fmt.Println(err.Error())
+		return
+	}
+	fmt.Println(string(responseFromAPI))
 }
 
 func main() {
-	//Per sempre
+
 	for true {
-		//Presenta l'applicativo ed ottieni la scelta dell'utente
-		t := time.Now()
-		h, m, s := t.Clock()
-		fmt.Println("Benvenuto, sono le ", h, ":", m, ":", s, ", quale operazione vuoi eseguire?")
-		fmt.Println("1) leggere un file")
-		fmt.Println("2) scrivere un file")
-		fmt.Println("3) eliminare un file")
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Inserire il numero dell'azione scelta: ")
-		action, _ := reader.ReadString('\n')
-		action = action[0:len(action)-1] + "" //Ritaglia la stringa togliendo \n
+		clientInit()              //Initialize application
+		action := acquireString() //Acquire user target action
 		switch {
 		case action == "1":
 			read()
 		case action == "2":
 			write()
-		/*case "3":
-		del*/
+		case action == "3":
+			del()
 		default:
-			fmt.Println("Scelta non valida.")
+			fmt.Println("Invalid input. Restarting the program ...")
 		}
-
-		fmt.Println("Premi invio per sottomettere una nuova richiesta, o esegui un'interrupt per uscire.")
-		fmt.Scanln() // wait for Enter Key
-
+		waitForNextAction() //Wait for Enter key ...
 	}
+}
+
+func acquireString() string {
+	stdin, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	stdin = stdin[0:len(stdin)-1] + "" //Ritaglia la stringa togliendo \n
+	return stdin
+}
+func isStringIllegal(s string) bool {
+	if strings.Contains(s, "|") || strings.Contains(s, ".") || strings.Contains(s, "/") || strings.Compare(s, "") == 0 {
+		fmt.Println("The inserted input is not admitted. Avoid using '.','|' or '/'. Restarting the program ...")
+		return true
+	}
+	return false
+}
+func clientInit() {
+	user, _ := user.Current()
+	t := time.Now()
+	h, m, s := t.Clock()
+	fmt.Println("-----------------------------------------------------------------------------------------------")
+	fmt.Println("Welcome ", user.Username, ", it's ", h, ":", m, ":", s, ", which action do you want to perform?")
+	fmt.Println("1) Read a file")
+	fmt.Println("2) Write a file")
+	fmt.Println("3) Delete a file")
+	fmt.Print("Insert the number of your choice: ")
+}
+func waitForNextAction() {
+	fmt.Println("Press Enter to continue, or execute an interrupt to leave.")
+	bufio.NewReader(os.Stdin).ReadString('\n')
 }
