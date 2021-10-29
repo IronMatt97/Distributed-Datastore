@@ -15,10 +15,11 @@ import (
 	"github.com/gorilla/mux"
 )
 
+var DiscoveryIP = "localhost"
 var Master bool = false
 var DSList = list.New()
 
-func putUpdateReplicas(w http.ResponseWriter, r *http.Request) {
+func put(w http.ResponseWriter, r *http.Request) {
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
 	receivedRequest := analyzeRequest(r)
@@ -39,7 +40,7 @@ func putUpdateReplicas(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//Se sono master aggiorno anche gli altri
-	if Master == true {
+	if Master {
 
 		var request string = fileName + "|" + fileContent //Build the request in a particular format
 		requestJSON, _ := json.Marshal(request)
@@ -50,7 +51,9 @@ func putUpdateReplicas(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
-				reportDSCrash() //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
+				reportDSCrash(fmt.Sprint(ds.Value)) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
+				DSList.Remove(ds)
+				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
 			if err != nil {
@@ -66,37 +69,92 @@ func putUpdateReplicas(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode("The file was successfully uploaded.")
 
 }
-func delUpdateReplicas(w http.ResponseWriter, r *http.Request) {
+func del(w http.ResponseWriter, r *http.Request) {
 	//Fai il delete, come il put. Poi se master è true procedi con aggiornare anche le repliche
 	//Questo è possibile perche se è master ha pure dslist. Cosi posso non implementare 4 funz
+	//Aggiorno me stesso
+	w.Header().Set("Content-Type", "Application/json")
+	fileToRemove := analyzeRequest(r)
+	err := os.Remove(fileToRemove) // Remove the file
+	if err != nil {
+		fmt.Println("An error has occurred trying to delete the file.")
+		fmt.Println(err.Error())
+		return
+	}
+
+	//Se sono master aggiorno anche gli altri
+	if Master {
+
+		var request string = fileToRemove //Build the request in a particular format
+		requestJSON, _ := json.Marshal(request)
+
+		for ds := DSList.Front(); ds != nil; ds = ds.Next() {
+
+			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+"/delete", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+			if err != nil {
+				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
+				fmt.Println(err.Error())
+				reportDSCrash(fmt.Sprint(ds.Value)) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
+				DSList.Remove(ds)
+				continue
+			}
+			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
+			if err != nil {
+				fmt.Println("An error has occurred trying to read the requested file.")
+				fmt.Println(err.Error())
+				return
+			}
+			fmt.Println(string(responseFromDS))
+		}
+	}
+	json.NewEncoder(w).Encode("The file was successfully removed.")
 
 }
-func reportDSCrash() {
+func get(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	params := mux.Vars(r)                       //Acquire url params
+	data, err := ioutil.ReadFile(params["key"]) //Try to read the requested file
+	if err != nil {
+		fmt.Println("An error has occurred reading the file.")
+		fmt.Println(err.Error())
+		return
+	}
+	json.NewEncoder(w).Encode(string(data)) //Send the response to the client
+}
+
+func reportDSCrash(dsCrashed string) {
+	var request string = dsCrashed //Build the request in a particular format
+	requestJSON, _ := json.Marshal(request)
+	http.Post("http://"+DiscoveryIP+"/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 
 }
 
 func main() {
 	register()
 	router := mux.NewRouter()
-	router.HandleFunc("/putUpdateReplicas", putUpdateReplicas).Methods("POST")
-	router.HandleFunc("/delUpdateReplicas", delUpdateReplicas).Methods("POST")
+	router.HandleFunc("/put", put).Methods("POST")
+	router.HandleFunc("/delete", del).Methods("POST")
+	router.HandleFunc("/get/{key}", get).Methods("GET")
+	router.HandleFunc("/becomeMaster", becomeMaster).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8000", router))
 	/*for e := DSList.Front(); e != nil; e = e.Next() {
 		fmt.Println(e.Value)
 	}*/ /*CICLA LA LISTA*/
 }
-
+func becomeMaster(w http.ResponseWriter, r *http.Request) {
+	Master = true
+}
 func register() {
 	requestJSON, _ := json.Marshal("datastore")
-	response, err := http.Post("http://localhost:8000/register", "application/json", bytes.NewBuffer(requestJSON))
+	response, err := http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Se fallisce riprova ogni 3 secondi
 		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node.")
 		fmt.Println(err.Error())
 		time.Sleep(3 * time.Second)
-		response, err = http.Post("http://localhost:8000/register", "application/json", bytes.NewBuffer(requestJSON))
+		response, err = http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
-	if strings.Contains(string(responseFromDiscovery), "master") == true {
+	if strings.Contains(string(responseFromDiscovery), "master") {
 		Master = true
 		acquireDSList(string(responseFromDiscovery[0 : len(string(responseFromDiscovery))-6]))
 		return

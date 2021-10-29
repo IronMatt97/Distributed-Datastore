@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"container/list"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -13,7 +16,31 @@ import (
 
 var MasterIP string = ""
 var DSlist string = ""
-var restAPIlist string = ""
+var restAPIlist = list.New()
+
+func dsCrash(w http.ResponseWriter, r *http.Request) {
+	dsToRemove := analyzeRequest(r)
+	DSlist = strings.Replace(DSlist, dsToRemove+"|", "", -1) //Sostituisci sempre la stringa da rimuovere con spazio vuoto
+	os.Remove("DS-" + dsToRemove)
+}
+func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
+	DSlist = strings.Replace(DSlist, MasterIP+"|", "", -1) //Sostituisci sempre la stringa da rimuovere con spazio vuoto
+	os.Remove("DS-" + MasterIP)
+	electNewMaster()
+	requestJSON, _ := json.Marshal(MasterIP)
+	for api := restAPIlist.Front(); api != nil; api = api.Next() {
+		http.Post("http://"+fmt.Sprint(api)+"/changeMaster", "application/json", bytes.NewBuffer(requestJSON))
+	}
+}
+func electNewMaster() {
+	for pos, char := range DSlist {
+		fmt.Println(char)
+		if char == 124 { //Quindi se ho trovato un |
+			MasterIP = DSlist[0:pos]
+			break
+		}
+	}
+}
 
 func registerNewNode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
@@ -41,6 +68,7 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 			fmt.Println(err.Error())
 			return
 		}
+		response = MasterIP + "restAPI"
 	}
 	//Answer requestOK
 	json.NewEncoder(w).Encode(response)
@@ -48,9 +76,13 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
 	router := mux.NewRouter()
 	router.HandleFunc("/register", registerNewNode).Methods("POST")
+	router.HandleFunc("/dsCrash", dsCrash).Methods("POST")
+	router.HandleFunc("/dsMasterCrash", dsMasterCrash).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8000", router))
+
 }
 func analyzeRequest(r *http.Request) string {
 	requestBody, err := ioutil.ReadAll(r.Body) //Read the request
@@ -73,13 +105,12 @@ func acquireIP(ip string, mode string) string {
 	ip = ip[0:len(ip)-6] + "" //RITAGLIA L'IP
 
 	if mode == "datastore" {
-		if strings.Contains(DSlist, ip) == false {
+		if !strings.Contains(DSlist, ip) {
 			DSlist = DSlist + ip + "|"
 		}
 	} else if mode == "restAPI" {
-		if strings.Contains(restAPIlist, ip) == false {
-			restAPIlist = restAPIlist + ip + "|"
-		}
+		//TODO CONTROLLA CHE L'IP NON SIA GIA NELLA LISTA
+		restAPIlist.PushBack(ip)
 	}
 	return ip
 }
