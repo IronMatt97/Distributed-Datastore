@@ -13,26 +13,30 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var DiscoveryIP string = "localhost"
+var DiscoveryIP string = "192.168.1.74"
 var DSMasterIP string = ""
 var DSBalancerIP string = ""
 
+//TODO IMPLEMENTA CHE SE CRASHA DISCOVERY ASPETTA
 func reportDSMasterCrash() {
+	fmt.Println("Master crashed: sending this to discovery.")
 	var request string = DSMasterIP //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)
-	http.Post("http://"+DiscoveryIP+"/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	http.Post("http://"+DiscoveryIP+":8000/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 
 }
 func changeDSMasterOnCrash(w http.ResponseWriter, r *http.Request) {
 	DSMasterIP = analyzeRequest(r)
+	fmt.Println("Master crashed: the new master is " + DSMasterIP)
 }
 
 func get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
-	params := mux.Vars(r)                                                              //Acquire url params
-	response, err := http.Get("http://" + DSBalancerIP + ":8000/get/" + params["key"]) //Submitting a get request
+	params := mux.Vars(r)                                                            //RIMETTI QUI DSBalancerIP TODO
+	fmt.Println("get called: I wanna read " + params["key"] + " on " + DSMasterIP)   //Acquire url params
+	response, err := http.Get("http://" + DSMasterIP + ":8000/get/" + params["key"]) //Submitting a get request
 	if err != nil {
-		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
+		fmt.Println("An error has occurred trying to estabilish a connection with the MasterDS.")
 		fmt.Println(err.Error())
 		return
 	}
@@ -42,7 +46,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err.Error())
 		return
 	}
-	fmt.Println(string(responseFromDS))
+	fmt.Println("the file requested is " + string(responseFromDS))
 	json.NewEncoder(w).Encode(string(responseFromDS)) //Send the response to the client
 }
 
@@ -53,26 +57,31 @@ func put(w http.ResponseWriter, r *http.Request) {
 	var fileName string = info[0]
 	var fileContent string = info[1]
 	var request string = fileName + "|" + fileContent //Build the request in a particular format
+	fmt.Println("put called: I wanna write " + request + " on " + DSMasterIP)
 	requestJSON, _ := json.Marshal(request)
-	_, err := http.Post("http://"+DSMasterIP+"/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	response, err := http.Post("http://"+DSMasterIP+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		reportDSMasterCrash()
+		fmt.Println(err.Error())
 		return
 	}
-	json.NewEncoder(w).Encode("The file was successfully uploaded.")
+	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
+	json.NewEncoder(w).Encode(string(responseFromDS))
 }
 
 func del(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	fileToRemove := analyzeRequest(r)
 	var request string = fileToRemove //Build the request in a particular format
+	fmt.Println("del called: I wanna remove " + fileToRemove + " on " + DSMasterIP)
 	requestJSON, _ := json.Marshal(request)
-	_, err := http.Post("http://"+DSMasterIP+"/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	response, err := http.Post("http://"+DSMasterIP+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		reportDSMasterCrash()
 		return
 	}
-	json.NewEncoder(w).Encode("The file was successfully removed.")
+	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
+	json.NewEncoder(w).Encode(string(responseFromDS))
 }
 
 func main() {
@@ -80,7 +89,7 @@ func main() {
 	router := mux.NewRouter()                           //Router initialization
 	router.HandleFunc("/put", put).Methods("POST")      //put requests handler/endpoint
 	router.HandleFunc("/get/{key}", get).Methods("GET") //get requests handler/endpoint
-	router.HandleFunc("/delete", del).Methods("POST")   //del requests handler/endpoint
+	router.HandleFunc("/del", del).Methods("POST")      //del requests handler/endpoint
 	router.HandleFunc("/changeMaster", changeDSMasterOnCrash).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8000", router)) //Listen and serve requests on port 8000
 }
@@ -96,9 +105,11 @@ func register() {
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
 	if strings.Contains(string(responseFromDiscovery), "restAPI") {
 
-		DSMasterIP = (string(responseFromDiscovery[0 : len(string(responseFromDiscovery))-7]))
-		return
+		DSMasterIP = (string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-9]))
+
 	}
+	//TODO l'API NON PUO REGISTRARSI FINCHE NON CE UN MASTER------- master è "" se non esiste! controlli e lo fai ripartire, deve aspettare finche non c'è un master!
+	fmt.Println("registration complete: the master is" + DSMasterIP)
 }
 
 func analyzeRequest(r *http.Request) string {

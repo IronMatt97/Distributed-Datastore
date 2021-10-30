@@ -15,6 +15,7 @@ import (
 
 var APIaddress string = "localhost"
 
+//TODO IMPLEMENTA APIcrash
 func read() {
 	fmt.Print("Name the file that you would like to read: ")
 	fileToRead := acquireString()
@@ -68,7 +69,7 @@ func del() {
 		return
 	}
 	requestJSON, _ := json.Marshal(fileToRemove)
-	response, err := http.Post("http://"+APIaddress+":8000/delete", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a delete request
+	response, err := http.Post("http://"+APIaddress+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a delete request
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())

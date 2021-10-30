@@ -15,10 +15,11 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var DiscoveryIP = "localhost"
+var DiscoveryIP = "192.168.1.74"
 var Master bool = false
 var DSList = list.New()
 
+//TODO IMPLEMENTA CHE SE CRASHA DISCOVERY ASPETTA
 func put(w http.ResponseWriter, r *http.Request) {
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
@@ -26,7 +27,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 	var info []string = strings.Split(receivedRequest, "|") //Acquire file name and content from client's request
 	var fileName string = info[0]
 	var fileContent string = info[1]
-
+	fmt.Println("put called: I wanna write on myself " + fileName + " : " + fileContent)
 	if _, err := os.Stat(fileName); err == nil {
 		json.NewEncoder(w).Encode("The file you requested already exists.") //Return error if file already exists
 		return
@@ -44,10 +45,10 @@ func put(w http.ResponseWriter, r *http.Request) {
 
 		var request string = fileName + "|" + fileContent //Build the request in a particular format
 		requestJSON, _ := json.Marshal(request)
-
+		fmt.Println("I am master, I am going to update with " + request + " replicas:")
 		for ds := DSList.Front(); ds != nil; ds = ds.Next() {
-
-			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+"/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+			fmt.Println("updating" + fmt.Sprint(ds.Value))
+			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
@@ -57,11 +58,11 @@ func put(w http.ResponseWriter, r *http.Request) {
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
 			if err != nil {
-				fmt.Println("An error has occurred trying to read the requested file.")
+				fmt.Println("An error has occurred trying to acquire replica response.")
 				fmt.Println(err.Error())
 				return
 			}
-			fmt.Println(string(responseFromDS))
+			fmt.Println("replica " + fmt.Sprint(ds.Value) + " answer to me: " + string(responseFromDS))
 		}
 	}
 
@@ -75,10 +76,12 @@ func del(w http.ResponseWriter, r *http.Request) {
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
 	fileToRemove := analyzeRequest(r)
+	fmt.Println("del called: I wanna del on myself " + fileToRemove)
 	err := os.Remove(fileToRemove) // Remove the file
 	if err != nil {
 		fmt.Println("An error has occurred trying to delete the file.")
 		fmt.Println(err.Error())
+		json.NewEncoder(w).Encode(string("The file you requested could not be removed."))
 		return
 	}
 
@@ -87,10 +90,10 @@ func del(w http.ResponseWriter, r *http.Request) {
 
 		var request string = fileToRemove //Build the request in a particular format
 		requestJSON, _ := json.Marshal(request)
-
+		fmt.Println("I am master, I am going to del " + request + "from replicas:")
 		for ds := DSList.Front(); ds != nil; ds = ds.Next() {
-
-			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+"/delete", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+			fmt.Println("deleting" + fmt.Sprint(ds.Value))
+			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
@@ -100,11 +103,11 @@ func del(w http.ResponseWriter, r *http.Request) {
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
 			if err != nil {
-				fmt.Println("An error has occurred trying to read the requested file.")
+				fmt.Println("An error has occurred trying to acquire answer from replica.")
 				fmt.Println(err.Error())
 				return
 			}
-			fmt.Println(string(responseFromDS))
+			fmt.Println("replica " + fmt.Sprint(ds.Value) + " answer to me: " + string(responseFromDS))
 		}
 	}
 	json.NewEncoder(w).Encode("The file was successfully removed.")
@@ -112,11 +115,15 @@ func del(w http.ResponseWriter, r *http.Request) {
 }
 func get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
-	params := mux.Vars(r)                       //Acquire url params
+	params := mux.Vars(r) //Acquire url params
+
+	fmt.Println("get called: I wanna read on myself " + params["key"])
+
 	data, err := ioutil.ReadFile(params["key"]) //Try to read the requested file
 	if err != nil {
 		fmt.Println("An error has occurred reading the file.")
 		fmt.Println(err.Error())
+		json.NewEncoder(w).Encode("An error has occurred reading the file/file does not exists.")
 		return
 	}
 	json.NewEncoder(w).Encode(string(data)) //Send the response to the client
@@ -125,7 +132,8 @@ func get(w http.ResponseWriter, r *http.Request) {
 func reportDSCrash(dsCrashed string) {
 	var request string = dsCrashed //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)
-	http.Post("http://"+DiscoveryIP+"/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	fmt.Println("ds crashed, sending this to discovery ")
+	http.Post("http://"+DiscoveryIP+":8000/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 
 }
 
@@ -133,19 +141,35 @@ func main() {
 	register()
 	router := mux.NewRouter()
 	router.HandleFunc("/put", put).Methods("POST")
-	router.HandleFunc("/delete", del).Methods("POST")
+	router.HandleFunc("/del", del).Methods("POST")
 	router.HandleFunc("/get/{key}", get).Methods("GET")
 	router.HandleFunc("/becomeMaster", becomeMaster).Methods("POST")
+	router.HandleFunc("/addDs", addDs).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8000", router))
 	/*for e := DSList.Front(); e != nil; e = e.Next() {
 		fmt.Println(e.Value)
 	}*/ /*CICLA LA LISTA*/
 }
+
+func addDs(w http.ResponseWriter, r *http.Request) {
+	req := analyzeRequest(r)
+
+	DSList.PushBack(req) //TODO FAI CHE NN LO AGGIUNGE SE CE GIA
+	fmt.Println("Aggiunta nuova replica: ora l'insieme dei ds è")
+	for ds := DSList.Front(); ds != nil; ds = ds.Next() {
+		fmt.Println(fmt.Sprint(ds.Value))
+	}
+}
+
 func becomeMaster(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("I AM MASTER NOW")
+	fmt.Println("I AM MASTER NOW")
+	fmt.Println("I AM MASTER NOW")
 	Master = true
 }
 func register() {
 	requestJSON, _ := json.Marshal("datastore")
+	fmt.Println("I am trying to register myself on " + DiscoveryIP)
 	response, err := http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Se fallisce riprova ogni 3 secondi
 		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node.")
@@ -155,7 +179,7 @@ func register() {
 	}
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
 	if strings.Contains(string(responseFromDiscovery), "master") {
-		Master = true
+		becomeMaster(nil, nil)
 		acquireDSList(string(responseFromDiscovery[0 : len(string(responseFromDiscovery))-6]))
 		return
 	}
