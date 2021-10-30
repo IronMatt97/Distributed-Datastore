@@ -15,7 +15,7 @@ import (
 
 var DiscoveryIP string = "192.168.1.74"
 var DSMasterIP string = ""
-var DSBalancerIP string = ""
+var DSBalancerIP string = "" //Ricordati nella funzione get di rimetterci DSBALANCERIp quando lo passi su amazon
 
 //TODO IMPLEMENTA CHE SE CRASHA DISCOVERY ASPETTA
 func reportDSMasterCrash() {

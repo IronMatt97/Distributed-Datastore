@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var APIaddress string = "localhost"
+var APIaddress string = "localhost" //Cambia questo con il balancer delle api
 
 //TODO IMPLEMENTA APIcrash
 func read() {
