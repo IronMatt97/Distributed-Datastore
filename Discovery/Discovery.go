@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/mux"
 )
@@ -16,6 +17,7 @@ import (
 var MasterIP string = ""
 var DSlist []string
 var restAPIlist []string
+var mutex sync.Mutex
 
 func dsCrash(w http.ResponseWriter, r *http.Request) {
 	dsToRemove := analyzeRequest(r)
@@ -28,7 +30,9 @@ func dsCrash(w http.ResponseWriter, r *http.Request) {
 			DSlist = a
 		}
 	}
+	mutex.Lock()
 	os.Remove("DS-" + dsToRemove)
+	mutex.Unlock()
 	fmt.Println("è stato rimosso un ds, ora la lista che mi risulta è ")
 	fmt.Println(DSlist)
 }
@@ -46,10 +50,13 @@ func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("In teoria ho rimostto il ds dalla lista, mi risultano i ds: ")
 	fmt.Println(DSlist)
 	fmt.Println("Sto per rimuovere" + "DS-" + MasterIP)
+	mutex.Lock()
 	os.Remove("DS-" + MasterIP)
+	mutex.Unlock()
 
 	electNewMaster()
 	requestJSON, _ := json.Marshal(buildDSList())
+	fmt.Println("La lista che ho comunicato al master " + MasterIP + "è " + buildDSList())
 	http.Post("http://"+MasterIP+":8000/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
 	fmt.Println("I just told the new master he is new master now")
 	requestJSON, _ = json.Marshal(MasterIP) //Devo mettere in attesa l'api di un nuovo ds
@@ -81,18 +88,22 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 	if strings.Compare(receivedRequest, "datastore") == 0 {
 		fmt.Println("entrato nel caso ds")
 		//Register new datastore
-		dsIP := acquireIP(r.RemoteAddr, "datastore")            //Aggiungi alla lista di ip e restituiscilo
+		dsIP := acquireIP(r.RemoteAddr, "datastore") //Aggiungi alla lista di ip e restituiscilo
+		mutex.Lock()
 		err := ioutil.WriteFile("DS-"+dsIP, []byte(dsIP), 0777) //Write the file
+		mutex.Unlock()
 		if err != nil {
 			fmt.Println("An error has occurred trying to register the datastore. ")
 			fmt.Println(err.Error())
 			return
 		}
 		if MasterIP == "" || MasterIP == dsIP {
+			MasterIP = dsIP
 			fmt.Println("sto dichiarando il nuovo master")
 			ipList := buildDSList()
+			fmt.Println("La lista appena costruita è")
+			fmt.Println(ipList)
 			response = ipList + "master"
-			MasterIP = dsIP
 			fmt.Println("Il nuovo master è " + MasterIP + " lo dico alle api presenti ovvero")
 			fmt.Println(restAPIlist)
 			requestJSON, _ := json.Marshal(MasterIP)
@@ -151,12 +162,17 @@ func main() {
 func buildDSList() string {
 	l := ""
 	for _, ds := range DSlist {
-		l = l + ds + "|"
+		if ds != MasterIP {
+
+			l = l + ds + "|"
+		}
 	}
 	return l
 }
 func checkForPrevState() {
+	mutex.Lock()
 	files, err := ioutil.ReadDir(".")
+	mutex.Unlock()
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -22,19 +22,24 @@ var MASTERip string = ""
 var mutex sync.Mutex
 
 func put(w http.ResponseWriter, r *http.Request) {
+	//provaMutex.Lock()
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
+	time.Sleep(2 * time.Second)
 	receivedRequest := analyzeRequest(r)
 	var info []string = strings.Split(receivedRequest, "|") //Acquire file name and content from client's request
 	var fileName string = info[0]
 	var fileContent string = info[1]
 	fmt.Println("put called: I wanna write on myself " + fileName + " : " + fileContent)
+
+	mutex.Lock()
 	if _, err := os.Stat(fileName); err == nil {
 		json.NewEncoder(w).Encode("The file you requested already exists.") //Return error if file already exists
+		mutex.Unlock()
 		return
 	}
 	err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Write the file
-
+	mutex.Unlock()
 	if err != nil {
 		fmt.Println("An error has occurred trying to write the file. ")
 		fmt.Println(err.Error())
@@ -73,18 +78,20 @@ func put(w http.ResponseWriter, r *http.Request) {
 
 	//solo dopo aver aggiornato eventualmente le repliche potra fare
 	json.NewEncoder(w).Encode("The file was successfully uploaded.")
-
+	//provaMutex.Unlock()
 }
 func del(w http.ResponseWriter, r *http.Request) {
+	//provaMutex.Lock()
 	//Fai il delete, come il put. Poi se master è true procedi con aggiornare anche le repliche
 	//Questo è possibile perche se è master ha pure dslist. Cosi posso non implementare 4 funz
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
-
+	time.Sleep(2 * time.Second)
 	fileToRemove := analyzeRequest(r)
 	fmt.Println("del called: I wanna del on myself " + fileToRemove)
-
+	mutex.Lock()
 	err := os.Remove(fileToRemove) // Remove the file
+	mutex.Unlock()
 	if err != nil {
 		fmt.Println("An error has occurred trying to delete the file.")
 		fmt.Println(err.Error())
@@ -123,15 +130,18 @@ func del(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode("The file was successfully removed.")
-
+	//provaMutex.Unlock()
 }
 func get(w http.ResponseWriter, r *http.Request) {
+	//provaMutex.Lock()
 	w.Header().Set("Content-Type", "Application/json")
+	time.Sleep(1 * time.Second)
 	params := mux.Vars(r) //Acquire url params
 
 	fmt.Println("get called: I wanna read on myself " + params["key"])
-
+	mutex.Lock()
 	data, err := ioutil.ReadFile(params["key"]) //Try to read the requested file
+	mutex.Unlock()
 	if err != nil {
 		fmt.Println("An error has occurred reading the file.")
 		fmt.Println(err.Error())
@@ -140,6 +150,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	time.Sleep(1 * time.Second)
 	json.NewEncoder(w).Encode(string(data)) //Send the response to the client
+	//provaMutex.Unlock()
 }
 
 func reportDSCrash(dsCrashed string) {
@@ -225,14 +236,18 @@ func flushLocalfiles() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	mutex.Lock()
 	files, err := f.Readdir(-1)
+	mutex.Unlock()
 	f.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, file := range files {
 		if strings.Compare(file.Name(), "DS") != 0 {
+			mutex.Lock()
 			err := os.Remove(file.Name()) // Remove the file
+			mutex.Unlock()
 			if err != nil {
 				fmt.Println("An error has occurred trying to delete the file " + file.Name())
 				fmt.Println(err.Error())
@@ -308,7 +323,9 @@ func prepareDataList() string {
 	if err != nil {
 		log.Fatal(err)
 	}
+	mutex.Lock()
 	files, err := f.Readdir(-1)
+	mutex.Unlock()
 	f.Close()
 	if err != nil {
 		log.Fatal(err)
@@ -316,7 +333,9 @@ func prepareDataList() string {
 	var list string
 	for _, file := range files {
 		if strings.Compare(file.Name(), "DS") != 0 {
+			mutex.Lock()
 			fileContent, _ := ioutil.ReadFile(file.Name())
+			mutex.Unlock()
 			list = list + file.Name() + "|" + string(fileContent) + "|"
 		}
 	}
