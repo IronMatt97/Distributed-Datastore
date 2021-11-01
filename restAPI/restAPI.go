@@ -17,13 +17,16 @@ var DiscoveryIP string = "192.168.1.74"
 var DSMasterIP string = ""
 var DSBalancerIP string = "" //Ricordati nella funzione get di rimetterci DSBALANCERIp quando lo passi su amazon
 
-//TODO IMPLEMENTA CHE SE CRASHA DISCOVERY ASPETTA
 func reportDSMasterCrash() {
 	fmt.Println("Master crashed: sending this to discovery.")
 	var request string = DSMasterIP //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)
-	http.Post("http://"+DiscoveryIP+":8000/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
-
+	_, err := http.Post("http://"+DiscoveryIP+":8000/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	for err != nil {
+		fmt.Println("discovery crashed. Waitng for it to restart.")
+		time.Sleep(3 * time.Second)
+		_, err = http.Post("http://"+DiscoveryIP+":8000/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
+	}
 }
 func changeDSMasterOnCrash(w http.ResponseWriter, r *http.Request) {
 	DSMasterIP = analyzeRequest(r)
@@ -36,7 +39,10 @@ func get(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("get called: I wanna read " + params["key"] + " on " + DSMasterIP)   //Acquire url params
 	response, err := http.Get("http://" + DSMasterIP + ":8000/get/" + params["key"]) //Submitting a get request
 	if err != nil {
-		fmt.Println("An error has occurred trying to estabilish a connection with the MasterDS.")
+		reportDSMasterCrash()
+		fmt.Println(err.Error()) //Questa cosa qui andrà cambiata, se viene usato il load balancer in teoria non si verifica mai
+		//perche ci sarà sempre una copia su che potrà fornire.
+		fmt.Println("An error has occurred trying to estabilish a connection with the Datastore. Retry later.")
 		fmt.Println(err.Error())
 		return
 	}
@@ -63,6 +69,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		reportDSMasterCrash()
 		fmt.Println(err.Error())
+		json.NewEncoder(w).Encode("Master crashed. Try again later.")
 		return
 	}
 	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -78,6 +85,8 @@ func del(w http.ResponseWriter, r *http.Request) {
 	response, err := http.Post("http://"+DSMasterIP+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		reportDSMasterCrash()
+		fmt.Println(err.Error())
+		json.NewEncoder(w).Encode("Master crashed. Try again later.")
 		return
 	}
 	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -91,7 +100,13 @@ func main() {
 	router.HandleFunc("/get/{key}", get).Methods("GET") //get requests handler/endpoint
 	router.HandleFunc("/del", del).Methods("POST")      //del requests handler/endpoint
 	router.HandleFunc("/changeMaster", changeDSMasterOnCrash).Methods("POST")
+	router.HandleFunc("/whoIsMaster", whoIsMaster).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8000", router)) //Listen and serve requests on port 8000
+}
+func whoIsMaster(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	fmt.Println("Il discovery mi ha chiesto chi è il master, e per me è " + DSMasterIP)
+	json.NewEncoder(w).Encode(DSMasterIP)
 }
 func register() {
 	requestJSON, _ := json.Marshal("restAPI")
@@ -103,12 +118,19 @@ func register() {
 		response, err = http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
-	if strings.Contains(string(responseFromDiscovery), "restAPI") {
-
-		DSMasterIP = (string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-9]))
-
+	//l'API NON PUO REGISTRARSI FINCHE NON CE UN MASTER------- master è "" se non esiste! controlli e lo fai ripartire, deve aspettare finche non c'è un master!
+	fmt.Println("The discovery answered: " + string(responseFromDiscovery))
+	for strings.Compare(string(responseFromDiscovery)[1:len(string(responseFromDiscovery))-2], "restAPI") == 0 {
+		fmt.Println("The master is not here yet. I am gonna wait")
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
+		responseFromDiscovery, _ = ioutil.ReadAll(response.Body) //Receiving http response
 	}
-	//TODO l'API NON PUO REGISTRARSI FINCHE NON CE UN MASTER------- master è "" se non esiste! controlli e lo fai ripartire, deve aspettare finche non c'è un master!
+
+	DSMasterIP = (string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-9]))
+	DSMasterIP = strings.ReplaceAll(DSMasterIP, "\\", "")
+	DSMasterIP = strings.ReplaceAll(DSMasterIP, "n", "") //Cleaning the output
+	DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
 	fmt.Println("registration complete: the master is" + DSMasterIP)
 }
 

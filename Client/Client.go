@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/user"
+	"strconv"
 	"strings"
 	"time"
 )
 
-var APIaddress string = "localhost" //Cambia questo con il balancer delle api
+var APIaddress string = "192.168.1.97" //Cambia questo con il balancer delle api
 
-//TODO IMPLEMENTA APIcrash
 func read() {
 	fmt.Print("Name the file that you would like to read: ")
 	fileToRead := acquireString()
@@ -31,7 +31,8 @@ func read() {
 		fmt.Println(err.Error())
 		return
 	}
-	fmt.Println(string(responseFromAPI))
+	resp := cleanResponse(responseFromAPI)
+	fmt.Println(resp)
 }
 
 func write() {
@@ -59,7 +60,8 @@ func write() {
 		fmt.Println(err.Error())
 		return
 	}
-	fmt.Println(string(responseFromAPI))
+	resp := cleanResponse(responseFromAPI)
+	fmt.Println(resp)
 }
 
 func del() {
@@ -81,7 +83,8 @@ func del() {
 		fmt.Println(err.Error())
 		return
 	}
-	fmt.Println(string(responseFromAPI))
+	resp := cleanResponse(responseFromAPI)
+	fmt.Println(resp)
 }
 
 func main() {
@@ -109,7 +112,7 @@ func acquireString() string {
 	return stdin
 }
 func isStringIllegal(s string) bool {
-	if strings.Contains(s, "|") || strings.Contains(s, ".") || strings.Contains(s, "/") || strings.Compare(s, "") == 0 {
+	if strings.Contains(s, "|") || strings.Contains(s, ".") || strings.Contains(s, "/") || strings.Compare(s, "") == 0 || strings.Compare(s, "DS") == 0 {
 		fmt.Println("The inserted input is not admitted. Avoid using '.','|' or '/'. Restarting the program ...")
 		return true
 	}
@@ -129,4 +132,16 @@ func clientInit() {
 func waitForNextAction() {
 	fmt.Println("Press Enter to continue, or execute an interrupt to leave.")
 	bufio.NewReader(os.Stdin).ReadString('\n')
+}
+func cleanResponse(r []byte) string {
+	str := string(r)
+	if strings.Contains(str, "\\") {
+		str = strconv.Quote(str)
+		str = strings.ReplaceAll(str, "\\", "")
+		str = strings.ReplaceAll(str, "\"", "")
+		if str[len(str)-1:] == "n" {
+			str = str[:len(str)-2] //Cleaning the output
+		}
+	}
+	return str
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"container/list"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -10,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -17,9 +17,10 @@ import (
 
 var DiscoveryIP = "192.168.1.74"
 var Master bool = false
-var DSList = list.New()
+var DSList []string
+var MASTERip string = ""
+var mutex sync.Mutex
 
-//TODO IMPLEMENTA CHE SE CRASHA DISCOVERY ASPETTA
 func put(w http.ResponseWriter, r *http.Request) {
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
@@ -32,8 +33,8 @@ func put(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode("The file you requested already exists.") //Return error if file already exists
 		return
 	}
-
 	err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Write the file
+
 	if err != nil {
 		fmt.Println("An error has occurred trying to write the file. ")
 		fmt.Println(err.Error())
@@ -46,14 +47,18 @@ func put(w http.ResponseWriter, r *http.Request) {
 		var request string = fileName + "|" + fileContent //Build the request in a particular format
 		requestJSON, _ := json.Marshal(request)
 		fmt.Println("I am master, I am going to update with " + request + " replicas:")
-		for ds := DSList.Front(); ds != nil; ds = ds.Next() {
-			fmt.Println("updating" + fmt.Sprint(ds.Value))
-			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+		for pos, ds := range DSList {
+			fmt.Println("updating" + ds)
+			response, err := http.Post("http://"+ds+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
-				reportDSCrash(fmt.Sprint(ds.Value)) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
-				DSList.Remove(ds)
+				reportDSCrash(ds) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
+				a := DSList[0:pos]
+				for _, s := range DSList[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				DSList = a
 				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -62,7 +67,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 				fmt.Println(err.Error())
 				return
 			}
-			fmt.Println("replica " + fmt.Sprint(ds.Value) + " answer to me: " + string(responseFromDS))
+			fmt.Println("replica " + ds + " answer to me: " + string(responseFromDS))
 		}
 	}
 
@@ -75,8 +80,10 @@ func del(w http.ResponseWriter, r *http.Request) {
 	//Questo è possibile perche se è master ha pure dslist. Cosi posso non implementare 4 funz
 	//Aggiorno me stesso
 	w.Header().Set("Content-Type", "Application/json")
+
 	fileToRemove := analyzeRequest(r)
 	fmt.Println("del called: I wanna del on myself " + fileToRemove)
+
 	err := os.Remove(fileToRemove) // Remove the file
 	if err != nil {
 		fmt.Println("An error has occurred trying to delete the file.")
@@ -91,14 +98,18 @@ func del(w http.ResponseWriter, r *http.Request) {
 		var request string = fileToRemove //Build the request in a particular format
 		requestJSON, _ := json.Marshal(request)
 		fmt.Println("I am master, I am going to del " + request + "from replicas:")
-		for ds := DSList.Front(); ds != nil; ds = ds.Next() {
-			fmt.Println("deleting" + fmt.Sprint(ds.Value))
-			response, err := http.Post("http://"+fmt.Sprint(ds.Value)+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+		for pos, ds := range DSList {
+			fmt.Println("deleting" + ds)
+			response, err := http.Post("http://"+ds+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
-				reportDSCrash(fmt.Sprint(ds.Value)) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
-				DSList.Remove(ds)
+				reportDSCrash(ds) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
+				a := DSList[0:pos]
+				for _, s := range DSList[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				DSList = a
 				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -107,9 +118,10 @@ func del(w http.ResponseWriter, r *http.Request) {
 				fmt.Println(err.Error())
 				return
 			}
-			fmt.Println("replica " + fmt.Sprint(ds.Value) + " answer to me: " + string(responseFromDS))
+			fmt.Println("replica " + ds + " answer to me: " + string(responseFromDS))
 		}
 	}
+
 	json.NewEncoder(w).Encode("The file was successfully removed.")
 
 }
@@ -126,6 +138,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode("An error has occurred reading the file/file does not exists.")
 		return
 	}
+	time.Sleep(1 * time.Second)
 	json.NewEncoder(w).Encode(string(data)) //Send the response to the client
 }
 
@@ -133,8 +146,12 @@ func reportDSCrash(dsCrashed string) {
 	var request string = dsCrashed //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)
 	fmt.Println("ds crashed, sending this to discovery ")
-	http.Post("http://"+DiscoveryIP+":8000/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
-
+	_, err := http.Post("http://"+DiscoveryIP+":8000/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	for err != nil {
+		fmt.Println("discovery crashed. Waitng for it to restart.")
+		time.Sleep(3 * time.Second)
+		_, err = http.Post("http://"+DiscoveryIP+":8000/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
+	}
 }
 
 func main() {
@@ -143,6 +160,7 @@ func main() {
 	router.HandleFunc("/put", put).Methods("POST")
 	router.HandleFunc("/del", del).Methods("POST")
 	router.HandleFunc("/get/{key}", get).Methods("GET")
+	router.HandleFunc("/getData", alignNewReplica).Methods("GET")
 	router.HandleFunc("/becomeMaster", becomeMaster).Methods("POST")
 	router.HandleFunc("/addDs", addDs).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8000", router))
@@ -151,14 +169,15 @@ func main() {
 	}*/ /*CICLA LA LISTA*/
 }
 
-func addDs(w http.ResponseWriter, r *http.Request) {
+func addDs(w http.ResponseWriter, r *http.Request) { //Questa funzione deve solo aggiungere al master la replica
+	//in un altra funzione bisogna invece allineare la replica, ma è la replica che deve richiederlo.
 	req := analyzeRequest(r)
 
-	DSList.PushBack(req) //TODO FAI CHE NN LO AGGIUNGE SE CE GIA
-	fmt.Println("Aggiunta nuova replica: ora l'insieme dei ds è")
-	for ds := DSList.Front(); ds != nil; ds = ds.Next() {
-		fmt.Println(fmt.Sprint(ds.Value))
+	if !isInlist(req, DSList) {
+		DSList = append(DSList, req)
 	}
+	fmt.Println("Aggiunta nuova replica: ora l'insieme dei ds è")
+	fmt.Println(DSList)
 }
 
 func becomeMaster(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +185,20 @@ func becomeMaster(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("I AM MASTER NOW")
 	fmt.Println("I AM MASTER NOW")
 	Master = true
+
+	//Se entra in questo if è stato chiamato dal discovery dopo un crash
+	if r != nil {
+		req := analyzeRequest(r)
+		acquireDSList(req)
+	}
+}
+func isInlist(e string, l []string) bool {
+	for _, elem := range l {
+		if strings.Compare(e, elem) == 0 {
+			return true
+		}
+	}
+	return false
 }
 func register() {
 	requestJSON, _ := json.Marshal("datastore")
@@ -183,12 +216,117 @@ func register() {
 		acquireDSList(string(responseFromDiscovery[0 : len(string(responseFromDiscovery))-6]))
 		return
 	}
+	//SE SEI ARRIVATO FINO A QUI SEI UNA REPLICA QUNDI DOVRAI AGGIORNARTI DOPO
+	MASTERip = string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-2])
+	getDataUntilNow()
+}
+func flushLocalfiles() {
+	f, err := os.Open(".")
+	if err != nil {
+		log.Fatal(err)
+	}
+	files, err := f.Readdir(-1)
+	f.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.Compare(file.Name(), "DS") != 0 {
+			err := os.Remove(file.Name()) // Remove the file
+			if err != nil {
+				fmt.Println("An error has occurred trying to delete the file " + file.Name())
+				fmt.Println(err.Error())
+				return
+			}
+		}
+	}
+}
+
+func getDataUntilNow() {
+	flushLocalfiles()
+	response, err := http.Get("http://" + MASTERip + ":8000/getData")
+	if err != nil {
+		fmt.Println("An error has occurred acquiring the data from master")
+		fmt.Println(err.Error())
+		return
+	}
+	data, _ := ioutil.ReadAll(response.Body)
+	dataList := string(data)
+	var lastindex = 1 //per via delle doppie virgolette iniziali
+	var mode int = 0
+	var fileName string
+	var fileContent string
+	for pos, char := range dataList {
+		fmt.Println("sto ciclando, ho per le mani il char , sto in mode " + fmt.Sprintln(mode))
+		fmt.Println(char)
+		fmt.Println("controllo che sia 124")
+		if char == 124 { //quindi se il carattere letto è |
+			fmt.Println("trovato un carattere 124")
+			if mode == 0 {
+				fmt.Println("entrato in if 0 , acquisisco da lastindex a pos ovvero da " + fmt.Sprint(lastindex) + " a " + fmt.Sprint(pos))
+				fileName = dataList[lastindex:pos]
+				mode = 1
+				lastindex = pos + 1
+				continue
+			}
+			if mode == 1 {
+				fmt.Println("entrato in if 1 , acquisisco da lastindex a pos ovvero da " + fmt.Sprint(lastindex) + " a " + fmt.Sprint(pos))
+				fileContent = dataList[lastindex:pos]
+				mode = 0
+				lastindex = pos + 1
+
+				//Procedo col salvare il file
+				temp := len(fileContent) - 2
+				if temp < 1 {
+					temp = 1
+				}
+				fmt.Println("ho acquisito nome e testo, I wanna write on myself " + fileName + " : " + fileContent[:temp])
+				if _, err := os.Stat(fileName); err == nil {
+					fmt.Println("The file you requested already exists.") //Return error if file already exists
+					return
+				}
+
+				err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Write the file
+				if err != nil {
+					fmt.Println("An error has occurred trying to write the file. ")
+					fmt.Println(err.Error())
+					return
+				}
+			}
+		}
+	}
+
+}
+func alignNewReplica(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	dataList := prepareDataList()
+	json.NewEncoder(w).Encode(dataList) //Send the response to the client
+}
+
+func prepareDataList() string {
+	f, err := os.Open(".")
+	if err != nil {
+		log.Fatal(err)
+	}
+	files, err := f.Readdir(-1)
+	f.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	var list string
+	for _, file := range files {
+		if strings.Compare(file.Name(), "DS") != 0 {
+			fileContent, _ := ioutil.ReadFile(file.Name())
+			list = list + file.Name() + "|" + string(fileContent) + "|"
+		}
+	}
+	return list
 }
 func acquireDSList(dslist string) {
 	var lastindex = 1 //per via delle doppie virgolette iniziali
 	for pos, char := range dslist {
 		if char == 124 { //quindi se il carattere letto è |
-			DSList.PushBack(dslist[lastindex:pos])
+			DSList = append(DSList, dslist[lastindex:pos])
 			lastindex = pos + 1
 		}
 	}
