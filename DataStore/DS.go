@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var DiscoveryIP = "172.0.17.2"
+var DiscoveryIP = "172.17.0.2"
 var Master bool = false
 var DSList []string
 var MASTERip string = ""

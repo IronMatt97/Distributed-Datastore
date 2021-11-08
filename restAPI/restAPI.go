@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var DiscoveryIP string = "172.0.17.2"
+var DiscoveryIP string = "172.17.0.2"
 var DSMasterIP string = ""
 var DSBalancerIP string = "" //Ricordati nella funzione get di rimetterci DSBALANCERIp quando lo passi su amazon
 
