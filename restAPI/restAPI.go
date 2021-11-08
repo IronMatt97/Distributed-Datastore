@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var DiscoveryIP string = "192.168.1.74"
+var DiscoveryIP string = "172.0.17.2"
 var DSMasterIP string = ""
 var DSBalancerIP string = "" //Ricordati nella funzione get di rimetterci DSBALANCERIp quando lo passi su amazon
 
@@ -21,11 +21,11 @@ func reportDSMasterCrash() {
 	fmt.Println("Master crashed: sending this to discovery.")
 	var request string = DSMasterIP //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)
-	_, err := http.Post("http://"+DiscoveryIP+":8000/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	_, err := http.Post("http://"+DiscoveryIP+":8080/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	for err != nil {
 		fmt.Println("discovery crashed. Waitng for it to restart.")
 		time.Sleep(3 * time.Second)
-		_, err = http.Post("http://"+DiscoveryIP+":8000/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
+		_, err = http.Post("http://"+DiscoveryIP+":8080/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
 	}
 }
 func changeDSMasterOnCrash(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	params := mux.Vars(r)                                                            //RIMETTI QUI DSBalancerIP TODO
 	fmt.Println("get called: I wanna read " + params["key"] + " on " + DSMasterIP)   //Acquire url params
-	response, err := http.Get("http://" + DSMasterIP + ":8000/get/" + params["key"]) //Submitting a get request
+	response, err := http.Get("http://" + DSMasterIP + ":8080/get/" + params["key"]) //Submitting a get request
 	if err != nil {
 		reportDSMasterCrash()
 		fmt.Println(err.Error()) //Questa cosa qui andrà cambiata, se viene usato il load balancer in teoria non si verifica mai
@@ -65,7 +65,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 	var request string = fileName + "|" + fileContent //Build the request in a particular format
 	fmt.Println("put called: I wanna write " + request + " on " + DSMasterIP)
 	requestJSON, _ := json.Marshal(request)
-	response, err := http.Post("http://"+DSMasterIP+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	response, err := http.Post("http://"+DSMasterIP+":8080/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		reportDSMasterCrash()
 		fmt.Println(err.Error())
@@ -82,7 +82,7 @@ func del(w http.ResponseWriter, r *http.Request) {
 	var request string = fileToRemove //Build the request in a particular format
 	fmt.Println("del called: I wanna remove " + fileToRemove + " on " + DSMasterIP)
 	requestJSON, _ := json.Marshal(request)
-	response, err := http.Post("http://"+DSMasterIP+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	response, err := http.Post("http://"+DSMasterIP+":8080/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		reportDSMasterCrash()
 		fmt.Println(err.Error())
@@ -101,7 +101,7 @@ func main() {
 	router.HandleFunc("/del", del).Methods("POST")      //del requests handler/endpoint
 	router.HandleFunc("/changeMaster", changeDSMasterOnCrash).Methods("POST")
 	router.HandleFunc("/whoIsMaster", whoIsMaster).Methods("POST")
-	log.Fatal(http.ListenAndServe(":8000", router)) //Listen and serve requests on port 8000
+	log.Fatal(http.ListenAndServe(":8080", router)) //Listen and serve requests on port 8080
 }
 func whoIsMaster(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
@@ -110,12 +110,12 @@ func whoIsMaster(w http.ResponseWriter, r *http.Request) {
 }
 func register() {
 	requestJSON, _ := json.Marshal("restAPI")
-	response, err := http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
+	response, err := http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Se fallisce riprova ogni 3 secondi
 		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node.")
 		fmt.Println(err.Error())
 		time.Sleep(3 * time.Second)
-		response, err = http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
+		response, err = http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
 	//l'API NON PUO REGISTRARSI FINCHE NON CE UN MASTER------- master è "" se non esiste! controlli e lo fai ripartire, deve aspettare finche non c'è un master!
@@ -123,7 +123,7 @@ func register() {
 	for strings.Compare(string(responseFromDiscovery)[1:len(string(responseFromDiscovery))-2], "restAPI") == 0 {
 		fmt.Println("The master is not here yet. I am gonna wait")
 		time.Sleep(3 * time.Second)
-		response, err = http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
+		response, err = http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 		responseFromDiscovery, _ = ioutil.ReadAll(response.Body) //Receiving http response
 	}
 

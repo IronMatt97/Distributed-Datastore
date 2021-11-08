@@ -15,7 +15,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var DiscoveryIP = "192.168.1.74"
+var DiscoveryIP = "172.0.17.2"
 var Master bool = false
 var DSList []string
 var MASTERip string = ""
@@ -54,7 +54,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("I am master, I am going to update with " + request + " replicas:")
 		for pos, ds := range DSList {
 			fmt.Println("updating" + ds)
-			response, err := http.Post("http://"+ds+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+			response, err := http.Post("http://"+ds+":8080/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
@@ -107,7 +107,7 @@ func del(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("I am master, I am going to del " + request + "from replicas:")
 		for pos, ds := range DSList {
 			fmt.Println("deleting" + ds)
-			response, err := http.Post("http://"+ds+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+			response, err := http.Post("http://"+ds+":8080/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 			if err != nil {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
@@ -157,11 +157,11 @@ func reportDSCrash(dsCrashed string) {
 	var request string = dsCrashed //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)
 	fmt.Println("ds crashed, sending this to discovery ")
-	_, err := http.Post("http://"+DiscoveryIP+":8000/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	_, err := http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	for err != nil {
 		fmt.Println("discovery crashed. Waitng for it to restart.")
 		time.Sleep(3 * time.Second)
-		_, err = http.Post("http://"+DiscoveryIP+":8000/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
+		_, err = http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
 	}
 }
 
@@ -174,7 +174,7 @@ func main() {
 	router.HandleFunc("/getData", alignNewReplica).Methods("GET")
 	router.HandleFunc("/becomeMaster", becomeMaster).Methods("POST")
 	router.HandleFunc("/addDs", addDs).Methods("POST")
-	log.Fatal(http.ListenAndServe(":8000", router))
+	log.Fatal(http.ListenAndServe(":8080", router))
 	/*for e := DSList.Front(); e != nil; e = e.Next() {
 		fmt.Println(e.Value)
 	}*/ /*CICLA LA LISTA*/
@@ -214,12 +214,12 @@ func isInlist(e string, l []string) bool {
 func register() {
 	requestJSON, _ := json.Marshal("datastore")
 	fmt.Println("I am trying to register myself on " + DiscoveryIP)
-	response, err := http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
+	response, err := http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Se fallisce riprova ogni 3 secondi
 		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node.")
 		fmt.Println(err.Error())
 		time.Sleep(3 * time.Second)
-		response, err = http.Post("http://"+DiscoveryIP+":8000/register", "application/json", bytes.NewBuffer(requestJSON))
+		response, err = http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
 	if strings.Contains(string(responseFromDiscovery), "master") {
@@ -259,7 +259,7 @@ func flushLocalfiles() {
 
 func getDataUntilNow() {
 	flushLocalfiles()
-	response, err := http.Get("http://" + MASTERip + ":8000/getData")
+	response, err := http.Get("http://" + MASTERip + ":8080/getData")
 	if err != nil {
 		fmt.Println("An error has occurred acquiring the data from master")
 		fmt.Println(err.Error())

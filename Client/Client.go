@@ -14,12 +14,12 @@ import (
 	"time"
 )
 
-var APIaddress string = "192.168.1.97" //Cambia questo con il balancer delle api
+var APIaddress string = "172.17.0.4" //Cambia questo con il balancer delle api
 
 func read() {
 	fmt.Print("Name the file that you would like to read: ")
 	fileToRead := acquireString()
-	response, err := http.Get("http://" + APIaddress + ":8000/get/" + fileToRead) //Submitting a get request
+	response, err := http.Get("http://" + APIaddress + ":8080/get/" + fileToRead) //Submitting a get request
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
@@ -48,7 +48,7 @@ func write() {
 	}
 	var request string = fileName + "|" + fileContent                                                              //Build the request in a particular format
 	requestJSON, _ := json.Marshal(request)                                                                        //Marshal the request
-	response, err := http.Post("http://"+APIaddress+":8000/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
+	response, err := http.Post("http://"+APIaddress+":8080/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
@@ -71,7 +71,7 @@ func del() {
 		return
 	}
 	requestJSON, _ := json.Marshal(fileToRemove)
-	response, err := http.Post("http://"+APIaddress+":8000/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a delete request
+	response, err := http.Post("http://"+APIaddress+":8080/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a delete request
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())

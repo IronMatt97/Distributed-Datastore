@@ -57,11 +57,11 @@ func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
 	electNewMaster()
 	requestJSON, _ := json.Marshal(buildDSList())
 	fmt.Println("La lista che ho comunicato al master " + MasterIP + "è " + buildDSList())
-	http.Post("http://"+MasterIP+":8000/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
+	http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
 	fmt.Println("I just told the new master he is new master now")
 	requestJSON, _ = json.Marshal(MasterIP) //Devo mettere in attesa l'api di un nuovo ds
 	for _, api := range restAPIlist {
-		http.Post("http://"+api+":8000/changeMaster", "application/json", bytes.NewBuffer(requestJSON))
+		http.Post("http://"+api+":8080/changeMaster", "application/json", bytes.NewBuffer(requestJSON))
 		fmt.Println("The new master is " + MasterIP + " and I am telling it to api :" + api)
 	}
 }
@@ -108,14 +108,14 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 			fmt.Println(restAPIlist)
 			requestJSON, _ := json.Marshal(MasterIP)
 			for _, api := range restAPIlist { //Appena eletto un nuovo master dillo a tutti
-				http.Post("http://"+api+":8000/changeMaster", "application/json", bytes.NewBuffer(requestJSON))
+				http.Post("http://"+api+":8080/changeMaster", "application/json", bytes.NewBuffer(requestJSON))
 				fmt.Println("The new master is " + MasterIP + " and I am telling it to api :" + api)
 			}
 		} else {
 			fmt.Println("I registered a new datastore: " + dsIP + " il master c'era gia quindi ora lo avviso della nuova replica")
 			requestJSON, _ := json.Marshal(dsIP)
 			fmt.Println("STO AVVISANDO IL MASTER CHE CE UNA NUOVA REPLICA")
-			http.Post("http://"+MasterIP+":8000/addDs", "application/json", bytes.NewBuffer(requestJSON)) //avvisa che c'è un nuovo DS
+			http.Post("http://"+MasterIP+":8080/addDs", "application/json", bytes.NewBuffer(requestJSON)) //avvisa che c'è un nuovo DS
 			fmt.Println("Sto rispondendo a " + dsIP + "l'indirizzo del master ovvero " + MasterIP + "per poi ritornare")
 			json.NewEncoder(w).Encode(MasterIP)
 			return
@@ -156,7 +156,7 @@ func main() {
 	router.HandleFunc("/register", registerNewNode).Methods("POST")
 	router.HandleFunc("/dsCrash", dsCrash).Methods("POST")
 	router.HandleFunc("/dsMasterCrash", dsMasterCrash).Methods("POST")
-	log.Fatal(http.ListenAndServe(":8000", router))
+	log.Fatal(http.ListenAndServe(":8080", router))
 
 }
 func buildDSList() string {
@@ -188,9 +188,9 @@ func checkForPrevState() {
 	if !apiListEmpty() {
 		//Ora interroga una API alla volta per sapere chi è il master
 		for _, api := range restAPIlist {
-			fmt.Println("Sto provando a chiedere chi è il master all'api " + "http://" + api + ":8000/whoIsMaster")
+			fmt.Println("Sto provando a chiedere chi è il master all'api " + "http://" + api + ":8080/whoIsMaster")
 			requestJSON, _ := json.Marshal("chi è il master?")
-			response, err := http.Post("http://"+api+":8000/whoIsMaster", "application/json", bytes.NewBuffer(requestJSON))
+			response, err := http.Post("http://"+api+":8080/whoIsMaster", "application/json", bytes.NewBuffer(requestJSON))
 			fmt.Println("in teoria ho mandato la post")
 			if err != nil {
 				fmt.Println("sembrerebbe che ho trovato un errore")
