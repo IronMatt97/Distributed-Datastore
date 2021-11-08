@@ -17,6 +17,7 @@ import (
 var MasterIP string = ""
 var DSlist []string
 var restAPIlist []string
+var apiPointer int = 0
 var mutex sync.Mutex
 
 func dsCrash(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +36,20 @@ func dsCrash(w http.ResponseWriter, r *http.Request) {
 	mutex.Unlock()
 	fmt.Println("è stato rimosso un ds, ora la lista che mi risulta è ")
 	fmt.Println(DSlist)
+	//Qui devo controllare che se ora il master non è piu nella lista vuol dire che era crashato il master, dovro dirlo
+	//sia alle api che eleggere il nuovo master
+	if dsToRemove == MasterIP {
+		electNewMaster()
+		requestJSON, _ := json.Marshal(buildDSList())
+		fmt.Println("La lista che ho comunicato al master " + MasterIP + "è " + buildDSList())
+		http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
+		fmt.Println("I just told the new master he is new master now")
+		requestJSON, _ = json.Marshal(MasterIP) //Devo mettere in attesa l'api di un nuovo ds
+		for _, api := range restAPIlist {
+			http.Post("http://"+api+":8080/changeMaster", "application/json", bytes.NewBuffer(requestJSON))
+			fmt.Println("The new master is " + MasterIP + " and I am telling it to api :" + api)
+		}
+	}
 }
 func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("ds master crash was called")
@@ -118,6 +133,11 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 			http.Post("http://"+MasterIP+":8080/addDs", "application/json", bytes.NewBuffer(requestJSON)) //avvisa che c'è un nuovo DS
 			fmt.Println("Sto rispondendo a " + dsIP + "l'indirizzo del master ovvero " + MasterIP + "per poi ritornare")
 			json.NewEncoder(w).Encode(MasterIP)
+			fmt.Println("anzi prima avviso pure le api del nuovo ds")
+			for _, api := range restAPIlist { //Appena eletto un nuovo ds replca dillo a tutti
+				http.Post("http://"+api+":8080/addDs", "application/json", bytes.NewBuffer(requestJSON))
+				fmt.Println("The new ds is " + dsIP + " and I am telling it to api :" + api)
+			}
 			return
 
 		}
@@ -133,12 +153,35 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 			fmt.Println(err.Error())
 			return
 		}
-		response = MasterIP + "restAPI"
+		response = ""
+		for _, ds := range DSlist {
+			if strings.Compare(ds, MasterIP) != 0 { //il master va messo alla fine
+				response = response + ds + "|"
+			}
+		}
+		response = response + MasterIP + "|"
 		fmt.Println("I registered a new restAPI: " + restAPI_IP)
 		if !isInlist(restAPI_IP, restAPIlist) {
 			restAPIlist = append(restAPIlist, restAPI_IP)
 		}
 
+	}
+	if strings.Compare(receivedRequest, "client") == 0 {
+		//registra un nuovo client, semplicemente informandolo di una api da usare
+		fmt.Println("entrato nel caso client")
+		if apiPointer > len(restAPIlist)-1 { //bug prevention
+			if (len(restAPIlist) - 1) == 0 {
+
+				fmt.Println("non ci sono API disponibili da comunicare al client. ")
+				response := "noapi"
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+			apiPointer = len(restAPIlist) - 1
+		}
+		api := restAPIlist[apiPointer]
+		apiPointer = (apiPointer + 1) % len(restAPIlist) //restituzione dell'api secondo logica round robin
+		response = api
 	}
 	//Answer requestOK
 	json.NewEncoder(w).Encode(response)
@@ -149,13 +192,45 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(DSlist)
 
 }
+func apicrash(w http.ResponseWriter, r *http.Request) {
+	apiToRemove := analyzeRequest(r)
+	for pos, api := range restAPIlist {
+		if strings.Compare(api, apiToRemove) == 0 {
+			a := restAPIlist[0:pos]
+			for _, s := range restAPIlist[pos+1:] { //Rimuovilo
+				a = append(a, s)
+			}
+			restAPIlist = a
+		}
+	}
+	mutex.Lock()
+	os.Remove("API-" + apiToRemove)
+	mutex.Unlock()
+	fmt.Println("è stato rimosso un api, ora la lista che mi risulta è ")
+	fmt.Println(restAPIlist)
+	//consegna nuova api da usare
+	if apiPointer > len(restAPIlist)-1 { //bug prevention
+		if (len(restAPIlist) - 1) == 0 {
 
+			fmt.Println("non ci sono API disponibili da comunicare al client. ")
+			response := "noapi"
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		apiPointer = len(restAPIlist) - 1
+	}
+	api := restAPIlist[apiPointer]
+	apiPointer = (apiPointer + 1) % len(restAPIlist) //restituzione dell'api secondo logica round robin
+	response := api
+	json.NewEncoder(w).Encode(response)
+}
 func main() {
 	checkForPrevState()
 	router := mux.NewRouter()
 	router.HandleFunc("/register", registerNewNode).Methods("POST")
 	router.HandleFunc("/dsCrash", dsCrash).Methods("POST")
 	router.HandleFunc("/dsMasterCrash", dsMasterCrash).Methods("POST")
+	router.HandleFunc("/apicrash", apicrash).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8080", router))
 
 }

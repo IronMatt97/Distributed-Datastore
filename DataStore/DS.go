@@ -174,12 +174,29 @@ func main() {
 	router.HandleFunc("/getData", alignNewReplica).Methods("GET")
 	router.HandleFunc("/becomeMaster", becomeMaster).Methods("POST")
 	router.HandleFunc("/addDs", addDs).Methods("POST")
+	router.HandleFunc("/removeDs", removeDs).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8080", router))
 	/*for e := DSList.Front(); e != nil; e = e.Next() {
 		fmt.Println(e.Value)
 	}*/ /*CICLA LA LISTA*/
 }
+func removeDs(w http.ResponseWriter, r *http.Request) {
 
+	req := analyzeRequest(r)
+	if !isInlist(req, DSList) {
+		return
+	}
+	//rimuovi il ds dalla lista
+	var t []string
+	for _, ds := range DSList {
+		if ds != req {
+			t = append(t, ds)
+		}
+	}
+	DSList = t
+	fmt.Println("rimossa replica: ora l'insieme dei ds è")
+	fmt.Println(DSList)
+}
 func addDs(w http.ResponseWriter, r *http.Request) { //Questa funzione deve solo aggiungere al master la replica
 	//in un altra funzione bisogna invece allineare la replica, ma è la replica che deve richiederlo.
 	req := analyzeRequest(r)

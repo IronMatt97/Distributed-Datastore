@@ -14,7 +14,8 @@ import (
 	"time"
 )
 
-var APIaddress string = "172.17.0.4" //Cambia questo con il balancer delle api
+var APIaddress string = "" //Cambia questo con il balancer delle api
+var DiscoveryAddress string = "172.17.0.2"
 
 func read() {
 	fmt.Print("Name the file that you would like to read: ")
@@ -23,6 +24,7 @@ func read() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
+		apicrash()
 		return
 	}
 	responseFromAPI, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -52,6 +54,7 @@ func write() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
+		apicrash()
 		return
 	}
 	responseFromAPI, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -75,6 +78,7 @@ func del() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
+		apicrash()
 		return
 	}
 	responseFromAPI, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -89,6 +93,7 @@ func del() {
 
 func main() {
 
+	register()
 	for {
 		clientInit()              //Initialize application
 		action := acquireString() //Acquire user target action
@@ -104,6 +109,46 @@ func main() {
 		}
 		waitForNextAction() //Wait for Enter key ...
 	}
+}
+
+func register() {
+	requestJSON, _ := json.Marshal("client")
+	response, err := http.Post("http://"+DiscoveryAddress+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
+	for err != nil { //Se fallisce riprova ogni 3 secondi
+		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node.")
+		fmt.Println(err.Error())
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+DiscoveryAddress+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
+	fmt.Println("The discovery answered: " + string(responseFromDiscovery) + " acquisiro da carattere uno a len-2")
+	if string(responseFromDiscovery) == "noapi" {
+		fmt.Println("there are no api to communicate with. retry later.")
+		os.Exit(-1)
+	}
+	APIaddress = (string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-2]))
+	APIaddress = strings.ReplaceAll(APIaddress, "\\", "")
+	APIaddress = strings.ReplaceAll(APIaddress, "n", "") //Cleaning the output
+	APIaddress = strings.ReplaceAll(APIaddress, "\"", "")
+	fmt.Println("registration complete: the api is" + APIaddress)
+}
+func apicrash() {
+	fmt.Println("The api has crashed. I am gonna ask discovery a new api to use")
+	requestJSON, _ := json.Marshal(APIaddress)
+	response, err := http.Post("http://"+DiscoveryAddress+":8080/apicrash", "application/json", bytes.NewBuffer(requestJSON))
+	for err != nil { //Se fallisce riprova ogni 3 secondi
+		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node. Retrying...")
+		fmt.Println(err.Error())
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+DiscoveryAddress+":8080/apicrash", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
+	if strings.Compare(string(responseFromDiscovery), "noapi") == 0 {
+		fmt.Println("There are no rest api available. retry later")
+		os.Exit(-1)
+	}
+	fmt.Println("The discovery answered the new api: " + string(responseFromDiscovery))
+	APIaddress = string(responseFromDiscovery)[1 : len(responseFromDiscovery)-2]
 }
 
 func acquireString() string {
