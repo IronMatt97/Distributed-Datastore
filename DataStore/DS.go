@@ -244,7 +244,7 @@ func flushLocalfiles() {
 		log.Fatal(err)
 	}
 	for _, file := range files {
-		if strings.Compare(file.Name(), "DS") != 0 {
+		if strings.Compare(file.Name(), "DS") != 0 && strings.Compare(file.Name(), "DS.go") != 0 {
 			mutex.Lock()
 			err := os.Remove(file.Name()) // Remove the file
 			mutex.Unlock()
@@ -332,7 +332,7 @@ func prepareDataList() string {
 	}
 	var list string
 	for _, file := range files {
-		if strings.Compare(file.Name(), "DS") != 0 {
+		if strings.Compare(file.Name(), "DS") != 0 && strings.Compare(file.Name(), "DS.go") != 0 {
 			mutex.Lock()
 			fileContent, _ := ioutil.ReadFile(file.Name())
 			mutex.Unlock()
