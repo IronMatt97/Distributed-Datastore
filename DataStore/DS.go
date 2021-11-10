@@ -60,13 +60,8 @@ func put(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
 				reportDSCrash(ds) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
-				if len(DSList) > 0 {
-					a := DSList[0:pos]
-					for _, s := range DSList[pos+1:] { //Rimuovilo
-						a = append(a, s)
-					}
-					DSList = a
-				}
+				removeDSFromList(pos)
+
 				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -82,6 +77,17 @@ func put(w http.ResponseWriter, r *http.Request) {
 	//solo dopo aver aggiornato eventualmente le repliche potra fare
 	json.NewEncoder(w).Encode("The file was successfully uploaded.")
 	//provaMutex.Unlock()
+}
+func removeDSFromList(pos int) {
+	if len(DSList) > 0 {
+		a := DSList[0:pos]
+		for _, s := range DSList[pos+1:] { //Rimuovilo
+			a = append(a, s)
+		}
+		mutex.Lock()
+		DSList = a
+		mutex.Unlock()
+	}
 }
 func del(w http.ResponseWriter, r *http.Request) {
 	//provaMutex.Lock()
@@ -115,13 +121,7 @@ func del(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
 				reportDSCrash(ds) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
-				if len(DSList) > 0 {
-					a := DSList[0:pos]
-					for _, s := range DSList[pos+1:] { //Rimuovilo
-						a = append(a, s)
-					}
-					DSList = a
-				}
+				removeDSFromList(pos)
 				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -181,10 +181,8 @@ func main() {
 	router.HandleFunc("/addDs", addDs).Methods("POST")
 	router.HandleFunc("/removeDs", removeDs).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8080", router))
-	/*for e := DSList.Front(); e != nil; e = e.Next() {
-		fmt.Println(e.Value)
-	}*/ /*CICLA LA LISTA*/
 }
+
 func removeDs(w http.ResponseWriter, r *http.Request) {
 
 	req := analyzeRequest(r)
@@ -198,7 +196,9 @@ func removeDs(w http.ResponseWriter, r *http.Request) {
 			t = append(t, ds)
 		}
 	}
+	mutex.Lock()
 	DSList = t
+	mutex.Unlock()
 	fmt.Println("rimossa replica: ora l'insieme dei ds è")
 	fmt.Println(DSList)
 }
@@ -207,7 +207,9 @@ func addDs(w http.ResponseWriter, r *http.Request) { //Questa funzione deve solo
 	req := analyzeRequest(r)
 
 	if !isInlist(req, DSList) {
+		mutex.Lock()
 		DSList = append(DSList, req)
+		mutex.Unlock()
 	}
 	fmt.Println("Aggiunta nuova replica: ora l'insieme dei ds è")
 	fmt.Println(DSList)
@@ -271,13 +273,15 @@ func cleanResponse(r []byte) string {
 	return str
 }
 func flushLocalfiles() {
+	mutex.Lock()
 	f, err := os.Open(".")
+	mutex.Unlock()
 	if err != nil {
 		log.Fatal(err)
 	}
-	mutex.Lock()
+
 	files, err := f.Readdir(-1)
-	mutex.Unlock()
+
 	f.Close()
 	if err != nil {
 		log.Fatal(err)
@@ -339,8 +343,9 @@ func getDataUntilNow() {
 					fmt.Println("The file you requested already exists.") //Return error if file already exists
 					return
 				}
-
+				mutex.Lock()
 				err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Write the file
+				mutex.Unlock()
 				if err != nil {
 					fmt.Println("An error has occurred trying to write the file. ")
 					fmt.Println(err.Error())
@@ -358,13 +363,13 @@ func alignNewReplica(w http.ResponseWriter, r *http.Request) {
 }
 
 func prepareDataList() string {
+	mutex.Lock()
 	f, err := os.Open(".")
+	mutex.Unlock()
 	if err != nil {
 		log.Fatal(err)
 	}
-	mutex.Lock()
 	files, err := f.Readdir(-1)
-	mutex.Unlock()
 	f.Close()
 	if err != nil {
 		log.Fatal(err)
@@ -385,7 +390,9 @@ func acquireDSList(dslist string) {
 	var lastindex = 0 //per via delle doppie virgolette iniziali
 	for pos, char := range dslist {
 		if char == 124 { //quindi se il carattere letto è |
+			mutex.Lock()
 			DSList = append(DSList, dslist[lastindex:pos])
+			mutex.Unlock()
 			lastindex = pos + 1
 		}
 	}

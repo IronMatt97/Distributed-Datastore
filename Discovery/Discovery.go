@@ -29,19 +29,26 @@ func chooseAPI() string {
 	n := rand.Intn(apiNum)
 	return restAPIlist[n]
 }
+func removeDSFromList(dsToRemove string) {
+	if len(DSlist) > 0 {
+		for pos, ds := range DSlist {
+			if strings.Compare(ds, dsToRemove) == 0 {
+				a := DSlist[0:pos]
+				for _, s := range DSlist[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				mutex.Lock()
+				DSlist = a
+				mutex.Unlock()
+			}
+		}
+	}
+}
 func dsCrash(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	dsToRemove := analyzeRequest(r)
 	fmt.Println(" Mi dicono che il ds " + dsToRemove + "e crashato")
-	for pos, ds := range DSlist {
-		if strings.Compare(ds, dsToRemove) == 0 {
-			a := DSlist[0:pos]
-			for _, s := range DSlist[pos+1:] { //Rimuovilo
-				a = append(a, s)
-			}
-			DSlist = a
-		}
-	}
+	removeDSFromList(dsToRemove)
 	mutex.Lock()
 	os.Remove("DS-" + dsToRemove)
 	mutex.Unlock()
@@ -80,15 +87,7 @@ func dsCrash(w http.ResponseWriter, r *http.Request) {
 func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	fmt.Println("ds master crash was called")
-	for pos, ds := range DSlist {
-		if strings.Compare(ds, MasterIP) == 0 {
-			a := DSlist[0:pos]
-			for _, s := range DSlist[pos+1:] { //Rimuovilo
-				a = append(a, s)
-			}
-			DSlist = a
-		}
-	}
+	removeDSFromList(MasterIP)
 	fmt.Println("In teoria ho rimosso il ds dalla lista, mi risultano i ds: ")
 	fmt.Println(DSlist)
 	fmt.Println("Sto per rimuovere" + "DS-" + MasterIP + "dai file locali")
@@ -106,15 +105,7 @@ func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
 	_, err := http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
 	for err != nil {
 		//Se non riesce ad eleggere l'altro master perche è crashato pure quello
-		for pos, ds := range DSlist {
-			if strings.Compare(ds, MasterIP) == 0 {
-				a := DSlist[0:pos]
-				for _, s := range DSlist[pos+1:] { //Rimuovilo
-					a = append(a, s)
-				}
-				DSlist = a
-			}
-		}
+		removeDSFromList(MasterIP)
 		//rimosso dalla lista lo cancella localmente
 		mutex.Lock()
 		os.Remove("DS-" + MasterIP)
@@ -202,8 +193,10 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 	if strings.Compare(receivedRequest, "restAPI") == 0 {
 		//Register new restAPI
 		fmt.Println("entrato nel caso restapi")
-		restAPI_IP := acquireIP(r.RemoteAddr, "restAPI")                     //Aggiungi alla lista di ip e restituiscilo
+		restAPI_IP := acquireIP(r.RemoteAddr, "restAPI") //Aggiungi alla lista di ip e restituiscilo
+		mutex.Lock()
 		err := ioutil.WriteFile("API-"+restAPI_IP, []byte(restAPI_IP), 0777) //Write the file
+		mutex.Unlock()
 		if err != nil {
 			fmt.Println("An error has occurred trying to register the datastore. ")
 			fmt.Println(err.Error())
@@ -218,7 +211,9 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 		response = response + MasterIP + "|"
 		fmt.Println("I registered a new restAPI: " + restAPI_IP)
 		if !isInlist(restAPI_IP, restAPIlist) {
+			mutex.Lock()
 			restAPIlist = append(restAPIlist, restAPI_IP)
+			mutex.Unlock()
 		}
 
 	}
@@ -237,18 +232,25 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(DSlist)
 
 }
+func removeAPIFromList(apiToRemove string) {
+	if len(restAPIlist) > 0 {
+		for pos, api := range restAPIlist {
+			if strings.Compare(api, apiToRemove) == 0 {
+				a := restAPIlist[0:pos]
+				for _, s := range restAPIlist[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				mutex.Lock()
+				restAPIlist = a
+				mutex.Unlock()
+			}
+		}
+	}
+}
 func apicrash(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	apiToRemove := analyzeRequest(r)
-	for pos, api := range restAPIlist {
-		if strings.Compare(api, apiToRemove) == 0 {
-			a := restAPIlist[0:pos]
-			for _, s := range restAPIlist[pos+1:] { //Rimuovilo
-				a = append(a, s)
-			}
-			restAPIlist = a
-		}
-	}
+	removeAPIFromList(apiToRemove)
 	mutex.Lock()
 	os.Remove("API-" + apiToRemove)
 	mutex.Unlock()
@@ -295,9 +297,13 @@ func checkForPrevState() {
 	for _, file := range files {
 		fmt.Println("I found already someone in the system: " + file.Name())
 		if strings.Contains(file.Name(), "DS-") {
+			mutex.Lock()
 			DSlist = append(DSlist, file.Name()[3:])
+			mutex.Unlock()
 		} else if strings.Contains(file.Name(), "API-") {
+			mutex.Lock()
 			restAPIlist = append(restAPIlist, file.Name()[4:])
+			mutex.Unlock()
 		}
 	}
 
@@ -391,7 +397,9 @@ func acquireIP(ip string, mode string) string {
 			}
 		}
 		if !alreadyExists {
+			mutex.Lock()
 			DSlist = append(DSlist, ip)
+			mutex.Unlock()
 		}
 	} else if mode == "restAPI" {
 		var alreadyExists bool = false
@@ -401,7 +409,9 @@ func acquireIP(ip string, mode string) string {
 			}
 		}
 		if !alreadyExists {
+			mutex.Lock()
 			restAPIlist = append(restAPIlist, ip)
+			mutex.Unlock()
 		}
 	}
 	return ip

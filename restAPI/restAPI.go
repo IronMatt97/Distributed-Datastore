@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -17,6 +18,7 @@ import (
 var DiscoveryIP string = "172.17.0.2"
 var DSMasterIP string = ""
 var DSList []string
+var mutex sync.Mutex
 
 func chooseDS() string {
 	dsNum := len(DSList)
@@ -51,18 +53,23 @@ func reportDSCrash(dsCrashed string) {
 		time.Sleep(3 * time.Second)
 		_, err = http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
 	}
-	//rimuovi il ds dalla lista
-	var t []string
-	for _, ds := range DSList {
-		if ds != dsCrashed {
-			t = append(t, ds)
-		}
-	}
-	DSList = t
+	removeDSFromList(dsCrashed)
 	fmt.Println("Ho rimosso il ds dalla lista, ora la lista risultante è ")
 	fmt.Println(DSList)
 }
-
+func removeDSFromList(dsToRemove string) {
+	if len(DSList) > 0 {
+		var t []string
+		for _, ds := range DSList {
+			if ds != dsToRemove {
+				t = append(t, ds)
+			}
+		}
+		mutex.Lock()
+		DSList = t
+		mutex.Unlock()
+	}
+}
 func get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	params := mux.Vars(r)
@@ -85,15 +92,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 			reportDSMasterCrash()
 			return
 		}
-		for pos, dsToRemove := range DSList {
-			if strings.Compare(ds, dsToRemove) == 0 {
-				a := DSList[0:pos]
-				for _, s := range DSList[pos+1:] { //Rimuovilo
-					a = append(a, s)
-				}
-				DSList = a
-			}
-		}
+		removeDSFromList(ds)
 		fmt.Println("Il ds è crashato, ora la lista per me è")
 		fmt.Println(DSList)
 		fmt.Println("Il master non so se c'è ancora, mi risulta essere " + DSMasterIP)
@@ -108,7 +107,6 @@ func get(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("the file requested is " + string(responseFromDS))
 	json.NewEncoder(w).Encode(string(responseFromDS)) //Send the response to the client
 }
-
 func put(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
 	receivedRequest := analyzeRequest(r)
@@ -135,15 +133,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		reportDSMasterCrash()
 		//fmt.Println(err.Error())
-		for pos, dsToRemove := range DSList {
-			if strings.Compare(DSMasterIP, dsToRemove) == 0 {
-				a := DSList[0:pos]
-				for _, s := range DSList[pos+1:] { //Rimuovilo
-					a = append(a, s)
-				}
-				DSList = a
-			}
-		}
+		removeDSFromList(DSMasterIP)
 		DSMasterIP = ""
 		response, err := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
 		for err != nil {
@@ -183,15 +173,7 @@ func del(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println(err.Error())
 		reportDSMasterCrash()
-		for pos, dsToRemove := range DSList {
-			if strings.Compare(DSMasterIP, dsToRemove) == 0 {
-				a := DSList[0:pos]
-				for _, s := range DSList[pos+1:] { //Rimuovilo
-					a = append(a, s)
-				}
-				DSList = a
-			}
-		}
+		removeDSFromList(DSMasterIP)
 		DSMasterIP = ""
 		response, err := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
 		for err != nil {
@@ -237,7 +219,9 @@ func removeDs(w http.ResponseWriter, r *http.Request) {
 			t = append(t, ds)
 		}
 	}
+	mutex.Lock()
 	DSList = t
+	mutex.Unlock()
 	fmt.Println("rimossa replica: ora l'insieme dei ds è")
 	fmt.Println(DSList)
 }
@@ -245,7 +229,9 @@ func addDs(w http.ResponseWriter, r *http.Request) {
 
 	req := analyzeRequest(r)
 	if !isInlist(req, DSList) {
+		mutex.Lock()
 		DSList = append(DSList, req)
+		mutex.Unlock()
 	}
 	fmt.Println("Aggiunta nuova replica: ora l'insieme dei ds è")
 	fmt.Println(DSList)
@@ -304,7 +290,9 @@ func acquireDSList(dslist string) {
 	for pos, char := range dslist {
 		if char == 124 { //quindi se il carattere letto è |
 			if !isInlist(dslist[lastindex:pos], DSList) {
+				mutex.Lock()
 				DSList = append(DSList, dslist[lastindex:pos])
+				mutex.Unlock()
 			}
 			lastindex = pos + 1
 		}
