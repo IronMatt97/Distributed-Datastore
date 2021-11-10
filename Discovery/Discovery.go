@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -17,11 +19,20 @@ import (
 var MasterIP string = ""
 var DSlist []string
 var restAPIlist []string
-var apiPointer int = 0
 var mutex sync.Mutex
 
+func chooseAPI() string {
+	apiNum := len(restAPIlist)
+	if apiNum == 0 {
+		return "noapi"
+	}
+	n := rand.Intn(apiNum)
+	return restAPIlist[n]
+}
 func dsCrash(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
 	dsToRemove := analyzeRequest(r)
+	fmt.Println(" Mi dicono che il ds " + dsToRemove + "e crashato")
 	for pos, ds := range DSlist {
 		if strings.Compare(ds, dsToRemove) == 0 {
 			a := DSlist[0:pos]
@@ -36,10 +47,25 @@ func dsCrash(w http.ResponseWriter, r *http.Request) {
 	mutex.Unlock()
 	fmt.Println("è stato rimosso un ds, ora la lista che mi risulta è ")
 	fmt.Println(DSlist)
+	fmt.Println("Il master secodo me è " + MasterIP)
+	//QUI DEVO AVVISARE TUTTE LE API ED IL MASTER DEL CRASH ---------------------------------
+	requestJSON, _ := json.Marshal(dsToRemove)
+	for _, api := range restAPIlist {
+		http.Post("http://"+api+":8080/removeDs", "application/json", bytes.NewBuffer(requestJSON))
+		fmt.Println("sto avvisando del crash l'api " + api)
+	}
+	fmt.Println("Sto avvisando del crash il master " + MasterIP)
+	http.Post("http://"+MasterIP+":8080/removeDs", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
+	//AGGIUNTO PEZZO DI CODICE FRA BARRETTE----------------------------------------
 	//Qui devo controllare che se ora il master non è piu nella lista vuol dire che era crashato il master, dovro dirlo
 	//sia alle api che eleggere il nuovo master
 	if dsToRemove == MasterIP {
+		fmt.Println("era crashato il master misa")
 		electNewMaster()
+		if MasterIP == "" {
+			fmt.Println("non c'è un nuovo master da fornire.")
+			return
+		}
 		requestJSON, _ := json.Marshal(buildDSList())
 		fmt.Println("La lista che ho comunicato al master " + MasterIP + "è " + buildDSList())
 		http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
@@ -52,6 +78,7 @@ func dsCrash(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
 	fmt.Println("ds master crash was called")
 	for pos, ds := range DSlist {
 		if strings.Compare(ds, MasterIP) == 0 {
@@ -62,17 +89,44 @@ func dsMasterCrash(w http.ResponseWriter, r *http.Request) {
 			DSlist = a
 		}
 	}
-	fmt.Println("In teoria ho rimostto il ds dalla lista, mi risultano i ds: ")
+	fmt.Println("In teoria ho rimosso il ds dalla lista, mi risultano i ds: ")
 	fmt.Println(DSlist)
-	fmt.Println("Sto per rimuovere" + "DS-" + MasterIP)
+	fmt.Println("Sto per rimuovere" + "DS-" + MasterIP + "dai file locali")
 	mutex.Lock()
 	os.Remove("DS-" + MasterIP)
 	mutex.Unlock()
-
+	fmt.Println("procedo con l'eleggere nuovo master")
 	electNewMaster()
+	if strings.Compare(MasterIP, "") == 0 {
+		fmt.Println("non c'è un nuovo master da fornire")
+		return
+	}
 	requestJSON, _ := json.Marshal(buildDSList())
 	fmt.Println("La lista che ho comunicato al master " + MasterIP + "è " + buildDSList())
-	http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
+	_, err := http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
+	for err != nil {
+		//Se non riesce ad eleggere l'altro master perche è crashato pure quello
+		for pos, ds := range DSlist {
+			if strings.Compare(ds, MasterIP) == 0 {
+				a := DSlist[0:pos]
+				for _, s := range DSlist[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				DSlist = a
+			}
+		}
+		//rimosso dalla lista lo cancella localmente
+		mutex.Lock()
+		os.Remove("DS-" + MasterIP)
+		mutex.Unlock()
+		electNewMaster()
+		if strings.Compare(MasterIP, "") == 0 {
+			fmt.Println("non c'è un nuovo master da fornire")
+			return
+		}
+		requestJSON, _ := json.Marshal(buildDSList())
+		_, err = http.Post("http://"+MasterIP+":8080/becomeMaster", "application/json", bytes.NewBuffer(requestJSON)) //Avvisa il nuovo master che ora è master
+	}
 	fmt.Println("I just told the new master he is new master now")
 	requestJSON, _ = json.Marshal(MasterIP) //Devo mettere in attesa l'api di un nuovo ds
 	for _, api := range restAPIlist {
@@ -138,6 +192,8 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 				http.Post("http://"+api+":8080/addDs", "application/json", bytes.NewBuffer(requestJSON))
 				fmt.Println("The new ds is " + dsIP + " and I am telling it to api :" + api)
 			}
+			fmt.Println("I ds ora risultano")
+			fmt.Println(DSlist)
 			return
 
 		}
@@ -169,18 +225,7 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 	if strings.Compare(receivedRequest, "client") == 0 {
 		//registra un nuovo client, semplicemente informandolo di una api da usare
 		fmt.Println("entrato nel caso client")
-		if apiPointer > len(restAPIlist)-1 { //bug prevention
-			if (len(restAPIlist) - 1) == 0 {
-
-				fmt.Println("non ci sono API disponibili da comunicare al client. ")
-				response := "noapi"
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-			apiPointer = len(restAPIlist) - 1
-		}
-		api := restAPIlist[apiPointer]
-		apiPointer = (apiPointer + 1) % len(restAPIlist) //restituzione dell'api secondo logica round robin
+		api := chooseAPI() //restituzione dell'api secondo logica round robin
 		response = api
 	}
 	//Answer requestOK
@@ -193,6 +238,7 @@ func registerNewNode(w http.ResponseWriter, r *http.Request) {
 
 }
 func apicrash(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
 	apiToRemove := analyzeRequest(r)
 	for pos, api := range restAPIlist {
 		if strings.Compare(api, apiToRemove) == 0 {
@@ -209,18 +255,7 @@ func apicrash(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("è stato rimosso un api, ora la lista che mi risulta è ")
 	fmt.Println(restAPIlist)
 	//consegna nuova api da usare
-	if apiPointer > len(restAPIlist)-1 { //bug prevention
-		if (len(restAPIlist) - 1) == 0 {
-
-			fmt.Println("non ci sono API disponibili da comunicare al client. ")
-			response := "noapi"
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-		apiPointer = len(restAPIlist) - 1
-	}
-	api := restAPIlist[apiPointer]
-	apiPointer = (apiPointer + 1) % len(restAPIlist) //restituzione dell'api secondo logica round robin
+	api := chooseAPI()
 	response := api
 	json.NewEncoder(w).Encode(response)
 }
@@ -231,8 +266,14 @@ func main() {
 	router.HandleFunc("/dsCrash", dsCrash).Methods("POST")
 	router.HandleFunc("/dsMasterCrash", dsMasterCrash).Methods("POST")
 	router.HandleFunc("/apicrash", apicrash).Methods("POST")
+	router.HandleFunc("/whoisMaster", whoIsMaster).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8080", router))
 
+}
+func whoIsMaster(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	json.NewEncoder(w).Encode(MasterIP)
+	fmt.Println("Mi hanno chiesto chi è il master e gli ho detto " + MasterIP)
 }
 func buildDSList() string {
 	l := ""
@@ -273,11 +314,24 @@ func checkForPrevState() {
 			}
 			fmt.Println("indirizzo valido trovato aggiorno il master.")
 			responseFromAPI, err := ioutil.ReadAll(response.Body)
-			MasterIP = string(responseFromAPI)
+			MasterIP = cleanResponse((responseFromAPI))
+			MasterIP = MasterIP[1 : len(MasterIP)-2]
 		}
 
 		fmt.Println("I acquired the master, which was " + MasterIP)
 	}
+}
+func cleanResponse(r []byte) string {
+	str := string(r)
+	if strings.Contains(str, "\\") {
+		str = strconv.Quote(str)
+		str = strings.ReplaceAll(str, "\\", "")
+		str = strings.ReplaceAll(str, "\"", "")
+		if str[len(str)-1:] == "n" {
+			str = str[:len(str)-2] //Cleaning the output
+		}
+	}
+	return str
 }
 func apiListEmpty() bool {
 	c := 0

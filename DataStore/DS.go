@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,11 +60,13 @@ func put(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
 				reportDSCrash(ds) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
-				a := DSList[0:pos]
-				for _, s := range DSList[pos+1:] { //Rimuovilo
-					a = append(a, s)
+				if len(DSList) > 0 {
+					a := DSList[0:pos]
+					for _, s := range DSList[pos+1:] { //Rimuovilo
+						a = append(a, s)
+					}
+					DSList = a
 				}
-				DSList = a
 				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -112,11 +115,13 @@ func del(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
 				fmt.Println(err.Error())
 				reportDSCrash(ds) //CHE VA IMPLEMENTATA PER RIPROVARCI ALMENO 1 VOLTA PRIMA DI TOGLIERE IP
-				a := DSList[0:pos]
-				for _, s := range DSList[pos+1:] { //Rimuovilo
-					a = append(a, s)
+				if len(DSList) > 0 {
+					a := DSList[0:pos]
+					for _, s := range DSList[pos+1:] { //Rimuovilo
+						a = append(a, s)
+					}
+					DSList = a
 				}
-				DSList = a
 				continue
 			}
 			responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -209,9 +214,9 @@ func addDs(w http.ResponseWriter, r *http.Request) { //Questa funzione deve solo
 }
 
 func becomeMaster(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("---------------")
 	fmt.Println("I AM MASTER NOW")
-	fmt.Println("I AM MASTER NOW")
-	fmt.Println("I AM MASTER NOW")
+	fmt.Println("---------------")
 	Master = true
 
 	//Se entra in questo if è stato chiamato dal discovery dopo un crash
@@ -245,8 +250,25 @@ func register() {
 		return
 	}
 	//SE SEI ARRIVATO FINO A QUI SEI UNA REPLICA QUNDI DOVRAI AGGIORNARTI DOPO
-	MASTERip = string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-2])
+	resp := cleanResponse(responseFromDiscovery)
+	resp = strings.ReplaceAll(resp, "\"", "")
+	resp = strings.ReplaceAll(resp, "\\", "")
+	resp = strings.ReplaceAll(resp, "\n", "")
+	//MASTERip = string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-2])
+	MASTERip = resp
 	getDataUntilNow()
+}
+func cleanResponse(r []byte) string {
+	str := string(r)
+	if strings.Contains(str, "\\") {
+		str = strconv.Quote(str)
+		str = strings.ReplaceAll(str, "\\", "")
+		str = strings.ReplaceAll(str, "\"", "")
+		if str[len(str)-1:] == "n" {
+			str = str[:len(str)-2] //Cleaning the output
+		}
+	}
+	return str
 }
 func flushLocalfiles() {
 	f, err := os.Open(".")
@@ -289,20 +311,20 @@ func getDataUntilNow() {
 	var fileName string
 	var fileContent string
 	for pos, char := range dataList {
-		fmt.Println("sto ciclando, ho per le mani il char , sto in mode " + fmt.Sprintln(mode))
+		//fmt.Println("sto ciclando, ho per le mani il char , sto in mode " + fmt.Sprintln(mode))
 		fmt.Println(char)
-		fmt.Println("controllo che sia 124")
+		//fmt.Println("controllo che sia 124")
 		if char == 124 { //quindi se il carattere letto è |
-			fmt.Println("trovato un carattere 124")
+			//fmt.Println("trovato un carattere 124")
 			if mode == 0 {
-				fmt.Println("entrato in if 0 , acquisisco da lastindex a pos ovvero da " + fmt.Sprint(lastindex) + " a " + fmt.Sprint(pos))
+				//fmt.Println("entrato in if 0 , acquisisco da lastindex a pos ovvero da " + fmt.Sprint(lastindex) + " a " + fmt.Sprint(pos))
 				fileName = dataList[lastindex:pos]
 				mode = 1
 				lastindex = pos + 1
 				continue
 			}
 			if mode == 1 {
-				fmt.Println("entrato in if 1 , acquisisco da lastindex a pos ovvero da " + fmt.Sprint(lastindex) + " a " + fmt.Sprint(pos))
+				//fmt.Println("entrato in if 1 , acquisisco da lastindex a pos ovvero da " + fmt.Sprint(lastindex) + " a " + fmt.Sprint(pos))
 				fileContent = dataList[lastindex:pos]
 				mode = 0
 				lastindex = pos + 1
@@ -312,7 +334,7 @@ func getDataUntilNow() {
 				if temp < 1 {
 					temp = 1
 				}
-				fmt.Println("ho acquisito nome e testo, I wanna write on myself " + fileName + " : " + fileContent[:temp])
+				fmt.Println("ho acquisito nome e testo, I wanna write on myself " + fileName + " : " + fileContent)
 				if _, err := os.Stat(fileName); err == nil {
 					fmt.Println("The file you requested already exists.") //Return error if file already exists
 					return
@@ -359,7 +381,8 @@ func prepareDataList() string {
 	return list
 }
 func acquireDSList(dslist string) {
-	var lastindex = 1 //per via delle doppie virgolette iniziali
+	strings.ReplaceAll(dslist, "\"", "")
+	var lastindex = 0 //per via delle doppie virgolette iniziali
 	for pos, char := range dslist {
 		if char == 124 { //quindi se il carattere letto è |
 			DSList = append(DSList, dslist[lastindex:pos])

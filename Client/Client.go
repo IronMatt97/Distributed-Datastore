@@ -24,6 +24,7 @@ func read() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
+		fmt.Println("Sto comunicando che la api è crashata")
 		apicrash()
 		return
 	}
@@ -33,7 +34,9 @@ func read() {
 		fmt.Println(err.Error())
 		return
 	}
+	fmt.Println("L'api mi ha risposto " + string(responseFromAPI))
 	resp := cleanResponse(responseFromAPI)
+	fmt.Println("Ho fatto il clean in " + resp)
 	fmt.Println(resp)
 }
 
@@ -54,6 +57,7 @@ func write() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
+		fmt.Println("Sto comunicando che la api è crashata")
 		apicrash()
 		return
 	}
@@ -64,6 +68,7 @@ func write() {
 		return
 	}
 	resp := cleanResponse(responseFromAPI)
+	fmt.Println("L api mi ha risposto: ")
 	fmt.Println(resp)
 }
 
@@ -78,6 +83,7 @@ func del() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		fmt.Println(err.Error())
+		fmt.Println("Sto comunicando che la api è crashata")
 		apicrash()
 		return
 	}
@@ -88,6 +94,7 @@ func del() {
 		return
 	}
 	resp := cleanResponse(responseFromAPI)
+	fmt.Println("Ho capito come risposta dall'api")
 	fmt.Println(resp)
 }
 
@@ -112,6 +119,7 @@ func main() {
 }
 
 func register() {
+	fmt.Println("Sto cercando di registrarmi al discovery")
 	requestJSON, _ := json.Marshal("client")
 	response, err := http.Post("http://"+DiscoveryAddress+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Se fallisce riprova ogni 3 secondi
@@ -121,15 +129,18 @@ func register() {
 		response, err = http.Post("http://"+DiscoveryAddress+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body) //Receiving http response
-	fmt.Println("The discovery answered: " + string(responseFromDiscovery) + " acquisiro da carattere uno a len-2")
+	fmt.Println("The discovery answered: " + string(responseFromDiscovery) + " devo stare attento non sia noapi")
 	if string(responseFromDiscovery) == "noapi" {
 		fmt.Println("there are no api to communicate with. retry later.")
 		os.Exit(-1)
 	}
+
 	APIaddress = (string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-2]))
 	APIaddress = strings.ReplaceAll(APIaddress, "\\", "")
 	APIaddress = strings.ReplaceAll(APIaddress, "n", "") //Cleaning the output
 	APIaddress = strings.ReplaceAll(APIaddress, "\"", "")
+	fmt.Println("Ora acquisiro della stringa suddetta " + APIaddress)
+
 	fmt.Println("registration complete: the api is" + APIaddress)
 }
 func apicrash() {
@@ -147,8 +158,8 @@ func apicrash() {
 		fmt.Println("There are no rest api available. retry later")
 		os.Exit(-1)
 	}
-	fmt.Println("The discovery answered the new api: " + string(responseFromDiscovery))
 	APIaddress = string(responseFromDiscovery)[1 : len(responseFromDiscovery)-2]
+	fmt.Println("The discovery answered the new api: " + APIaddress)
 }
 
 func acquireString() string {

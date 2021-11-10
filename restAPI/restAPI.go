@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -15,10 +16,16 @@ import (
 
 var DiscoveryIP string = "172.17.0.2"
 var DSMasterIP string = ""
-var DSBalancerIP string = "" //Ricordati nella funzione get di rimetterci DSBALANCERIp quando lo passi su amazon
 var DSList []string
-var DSpointer int = 0
 
+func chooseDS() string {
+	dsNum := len(DSList)
+	if dsNum == 0 {
+		return ""
+	}
+	n := rand.Intn(dsNum)
+	return DSList[n]
+}
 func reportDSMasterCrash() {
 	fmt.Println("Master crashed: sending this to discovery.")
 	var request string = DSMasterIP //Build the request in a particular format
@@ -52,33 +59,44 @@ func reportDSCrash(dsCrashed string) {
 		}
 	}
 	DSList = t
+	fmt.Println("Ho rimosso il ds dalla lista, ora la lista risultante è ")
+	fmt.Println(DSList)
 }
 
 func get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
-	params := mux.Vars(r)                                                                 //RIMETTI QUI DSBalancerIP TODO
-	fmt.Println("get called: I wanna read " + params["key"] + " on " + DSList[DSpointer]) //Acquire url params
+	params := mux.Vars(r)
+	ds := chooseDS()
+	if ds == "" {
+		fmt.Println("Al momento non ci sono ds, riprovare più tardi.")
+		json.NewEncoder(w).Encode("Al momento non ci sono ds, riprovare più tardi.")
+		return
+	}
+	fmt.Println("get called: I wanna read " + params["key"] + " on " + ds + "scelto randomicamente") //Acquire url params
 
-	if DSpointer > len(DSList)-1 { //bug prevention
-		if (len(DSList) - 1) == 0 {
-
-			fmt.Println("non ci sono Datastore disponibili da cui plevare l'informazione. ")
-			response := "ERROR: There are not datastores at the moment, retry later."
-			json.NewEncoder(w).Encode(response)
+	response, err := http.Get("http://" + ds + ":8080/get/" + params["key"]) //Submitting a get request
+	if err != nil {
+		reportDSCrash(ds)
+		fmt.Println("Il ds che ho scelto è crashato, lo rimuovo e lo dico a discovery")
+		//fmt.Println(err.Error()) RIMUOVO DA DSLIST IL CRASHATO
+		if ds == DSMasterIP {
+			DSMasterIP = ""
+			fmt.Println("era il master ad essere crashato")
+			reportDSMasterCrash()
 			return
 		}
-		DSpointer = len(DSList) - 1
-	}
-
-	response, err := http.Get("http://" + DSList[DSpointer] + ":8080/get/" + params["key"]) //Submitting a get request
-	dsused := DSList[DSpointer]
-	DSpointer = (DSpointer + 1) % len(DSList)
-	if err != nil {
-		reportDSCrash(dsused)
-		fmt.Println(err.Error()) //Questa cosa qui andrà cambiata, se viene usato il load balancer in teoria non si verifica mai
-		//perche ci sarà sempre una copia su che potrà fornire.
-		fmt.Println("An error has occurred trying to estabilish a connection with the Datastore. Retry later.")
-		fmt.Println(err.Error())
+		for pos, dsToRemove := range DSList {
+			if strings.Compare(ds, dsToRemove) == 0 {
+				a := DSList[0:pos]
+				for _, s := range DSList[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				DSList = a
+			}
+		}
+		fmt.Println("Il ds è crashato, ora la lista per me è")
+		fmt.Println(DSList)
+		fmt.Println("Il master non so se c'è ancora, mi risulta essere " + DSMasterIP)
 		return
 	}
 	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
@@ -99,32 +117,98 @@ func put(w http.ResponseWriter, r *http.Request) {
 	var fileContent string = info[1]
 	var request string = fileName + "|" + fileContent //Build the request in a particular format
 	fmt.Println("put called: I wanna write " + request + " on " + DSMasterIP)
+	for DSMasterIP == "" {
+		fmt.Println("There is not a master. Waiting for a master to come back")
+		time.Sleep(3 * time.Second)
+		response, _ := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+		r, _ := ioutil.ReadAll(response.Body)
+		DSMasterIP = string(r)
+		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
+		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
+	}
 	requestJSON, _ := json.Marshal(request)
+	if DSMasterIP == "" {
+		fmt.Println("Non c'è il master")
+		return
+	}
 	response, err := http.Post("http://"+DSMasterIP+":8080/put", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
 		reportDSMasterCrash()
-		fmt.Println(err.Error())
+		//fmt.Println(err.Error())
+		for pos, dsToRemove := range DSList {
+			if strings.Compare(DSMasterIP, dsToRemove) == 0 {
+				a := DSList[0:pos]
+				for _, s := range DSList[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				DSList = a
+			}
+		}
+		DSMasterIP = ""
+		response, err := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+		for err != nil {
+			fmt.Println("Discovery crashato, aspetto che torna")
+			time.Sleep(3 * time.Second)
+			response, err = http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+
+		}
+		r, _ := ioutil.ReadAll(response.Body)
+		DSMasterIP = string(r)
+		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
+		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
 		json.NewEncoder(w).Encode("Master crashed. Try again later.")
 		return
 	}
-	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
+	responseFromDS, _ := ioutil.ReadAll(response.Body) //Receiving http response
 	json.NewEncoder(w).Encode(string(responseFromDS))
 }
 
 func del(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
+
 	fileToRemove := analyzeRequest(r)
 	var request string = fileToRemove //Build the request in a particular format
 	fmt.Println("del called: I wanna remove " + fileToRemove + " on " + DSMasterIP)
+	for DSMasterIP == "" {
+		fmt.Println("There is not a master. Waiting for a master to come back")
+		time.Sleep(3 * time.Second)
+		response, _ := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+		r, _ := ioutil.ReadAll(response.Body)
+		DSMasterIP = string(r)
+		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
+		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
+	}
 	requestJSON, _ := json.Marshal(request)
 	response, err := http.Post("http://"+DSMasterIP+":8080/del", "application/json", bytes.NewBuffer(requestJSON)) //Submitting a put request
 	if err != nil {
-		reportDSMasterCrash()
 		fmt.Println(err.Error())
+		reportDSMasterCrash()
+		for pos, dsToRemove := range DSList {
+			if strings.Compare(DSMasterIP, dsToRemove) == 0 {
+				a := DSList[0:pos]
+				for _, s := range DSList[pos+1:] { //Rimuovilo
+					a = append(a, s)
+				}
+				DSList = a
+			}
+		}
+		DSMasterIP = ""
+		response, err := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+		for err != nil {
+			fmt.Println("Discovery crashato, aspetto che torna")
+			time.Sleep(3 * time.Second)
+			response, err = http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+
+		}
+		r, _ := ioutil.ReadAll(response.Body)
+		DSMasterIP = string(r)
+		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
+		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
+		//fmt.Println(err.Error())
 		json.NewEncoder(w).Encode("Master crashed. Try again later.")
 		return
 	}
-	responseFromDS, err := ioutil.ReadAll(response.Body) //Receiving http response
+	responseFromDS, _ := ioutil.ReadAll(response.Body) //Receiving http response
 	json.NewEncoder(w).Encode(string(responseFromDS))
 }
 
@@ -203,7 +287,7 @@ func register() {
 		}
 		responseFromDiscovery, _ = ioutil.ReadAll(response.Body) //Receiving http response
 	}
-
+	fmt.Println("sto cercando di registrarmi, ho ricevuto come dati " + string(responseFromDiscovery))
 	var dslist string = (string(responseFromDiscovery[0 : len(string(responseFromDiscovery))-2]))
 
 	dslist = strings.ReplaceAll(dslist, "\\", "")
@@ -219,7 +303,9 @@ func acquireDSList(dslist string) {
 	var lastindex = 0 //per via delle doppie virgolette iniziali
 	for pos, char := range dslist {
 		if char == 124 { //quindi se il carattere letto è |
-			DSList = append(DSList, dslist[lastindex:pos])
+			if !isInlist(dslist[lastindex:pos], DSList) {
+				DSList = append(DSList, dslist[lastindex:pos])
+			}
 			lastindex = pos + 1
 		}
 	}
