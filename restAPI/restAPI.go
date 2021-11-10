@@ -23,7 +23,17 @@ var mutex sync.Mutex
 func chooseDS() string {
 	dsNum := len(DSList)
 	if dsNum == 0 {
-		return ""
+		response, _ := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Submitting a put request
+		r, _ := ioutil.ReadAll(response.Body)
+		DSMasterIP = string(r)
+		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
+		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
+		if DSMasterIP != "" {
+			mutex.Lock()
+			DSList = append(DSList, DSMasterIP)
+			mutex.Unlock()
+		}
+		return DSMasterIP
 	}
 	n := rand.Intn(dsNum)
 	return DSList[n]
