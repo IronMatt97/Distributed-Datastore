@@ -292,7 +292,7 @@ func register() {
 	dslist = strings.ReplaceAll(dslist, "\"", "")
 	acquireDSList(dslist) //vengono restituiti tutti i ds con il master alla fine
 	DSMasterIP = DSList[len(DSList)-1]
-	fmt.Println("Registration process complete: the master is" + DSMasterIP)
+	fmt.Println("Registration process complete: the master is " + DSMasterIP)
 	fmt.Println("The Datastore list is: ")
 	fmt.Println(DSList)
 }

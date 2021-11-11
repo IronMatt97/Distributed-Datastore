@@ -165,6 +165,7 @@ func main() {
 //Funzione per la rimozione di un datastore dalla lista, chiamabile dal Discovery
 func removeDs(w http.ResponseWriter, r *http.Request) {
 	req := analyzeRequest(r)
+	req = strings.ReplaceAll(req, "\"", "")
 	if !isInlist(req, DSList) {
 		return
 	}
@@ -185,6 +186,7 @@ func removeDs(w http.ResponseWriter, r *http.Request) {
 //Funzione per aggiungere un Datastore alla lista, chiamabile dal Discovery
 func addDs(w http.ResponseWriter, r *http.Request) {
 	req := analyzeRequest(r)
+	req = strings.ReplaceAll(req, "\"", "")
 	if !isInlist(req, DSList) {
 		mutex.Lock()
 		DSList = append(DSList, req)
@@ -231,7 +233,7 @@ func register() {
 	responseFromDiscovery, _ := ioutil.ReadAll(response.Body)
 	if strings.Contains(string(responseFromDiscovery), "master") { //Il discovery potrebbe rispondere che ora la replica appena connessa è il master
 		becomeMaster(nil, nil)
-		acquireDSList(string(responseFromDiscovery[0 : len(string(responseFromDiscovery))-6]))
+		acquireDSList(string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-6]))
 		return
 	}
 	//Se si arriva fino a qui, significa che si tratta della registrazione di una replica
