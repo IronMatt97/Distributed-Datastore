@@ -21,6 +21,17 @@ var DSlist []string      //Lista dei Datastore
 var restAPIlist []string //Lista delle Api
 var mutex sync.Mutex     //Mutex per agire su strutture di dati condivise
 
+func main() {
+	checkForPrevState()
+	router := mux.NewRouter()
+	router.HandleFunc("/register", registerNewNode).Methods("POST")
+	router.HandleFunc("/dsCrash", dsCrash).Methods("POST")
+	router.HandleFunc("/dsMasterCrash", dsMasterCrash).Methods("POST")
+	router.HandleFunc("/apicrash", apicrash).Methods("POST")
+	router.HandleFunc("/whoisMaster", whoIsMaster).Methods("POST")
+	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
 //Funzione per scegliere una API da assegnare al client quando si unisce al sistema
 func chooseAPI() string {
 	apiNum := len(restAPIlist)
@@ -288,18 +299,6 @@ func apicrash(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func main() {
-	checkForPrevState()
-	router := mux.NewRouter()
-	router.HandleFunc("/register", registerNewNode).Methods("POST")
-	router.HandleFunc("/dsCrash", dsCrash).Methods("POST")
-	router.HandleFunc("/dsMasterCrash", dsMasterCrash).Methods("POST")
-	router.HandleFunc("/apicrash", apicrash).Methods("POST")
-	router.HandleFunc("/whoisMaster", whoIsMaster).Methods("POST")
-	log.Fatal(http.ListenAndServe(":8080", router))
-
-}
-
 //Funzione di utility chiamabile dall'esterno per consegnare l'indirizzo del master su richiesta
 func whoIsMaster(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
@@ -321,6 +320,7 @@ func buildDSList() string {
 
 //Funzione di recovery del Discovery; quando si avvia controlla sempre che non ci fosse già qualcuno nel sistema, per recuperare lo stato
 func checkForPrevState() {
+	fmt.Println("Discovery node initialized. Retreiving previous state if present...")
 	mutex.Lock()
 	files, err := ioutil.ReadDir(".") //Controlla localmente che non ci fosse già qualcuno
 	mutex.Unlock()
@@ -357,6 +357,7 @@ func checkForPrevState() {
 
 		fmt.Println("I reacquired the master, which was " + MasterIP)
 	}
+	fmt.Println("Discovery node correctly initialized.")
 }
 
 //Funzione di utility per la pulizia di stringhe

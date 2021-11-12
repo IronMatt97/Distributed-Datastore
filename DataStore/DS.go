@@ -16,138 +16,12 @@ import (
 	"github.com/gorilla/mux" //Libreria aggiuntiva presa da github che permette di utilizzare facilmente un servizio di listen and serve su una porta
 )
 
-var DiscoveryIP = "172.17.0.2" //Indirizzo del nodo discovery
-var Master bool = false        //Variabile che viene impostata a true solo dal datastore Master
-var DSList []string            //Lista dei datastore mantenuta dal Master
-var MASTERip string = ""       //Ip del master, utilizzato dalle repliche che si connettono al sistema per allinearsi
-var mutex sync.Mutex           //Mutex per agire sulle strutture dati condivise tra le diverse goroutine
-
-//Use case: il client vuole effettuare una put
-func put(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "Application/json")
-	time.Sleep(2 * time.Second) //Latenza simulata per contattare il DS Master
-	receivedRequest := analyzeRequest(r)
-	var info []string = strings.Split(receivedRequest, "|") //Acquisisci cosa bisogna salvare dalla richiesta dell'API
-	var fileName string = info[0]
-	var fileContent string = info[1]
-	fmt.Println("A put operation has been called. File save request is  '" + fileName + "' = '" + fileContent + "'")
-	mutex.Lock() //Inizia ad effettuare operazioni che devono essere mutualmente esclusive
-	if _, err := os.Stat(fileName); err == nil {
-		json.NewEncoder(w).Encode("The requested file already exists.")
-		mutex.Unlock()
-		return
-	}
-	err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Salva il file solo se non c'è già
-	mutex.Unlock()
-	if err != nil {
-		fmt.Println("An error has occurred trying to write the file. ")
-		json.NewEncoder(w).Encode("An error has occurred trying to write the file.")
-		return
-	}
-
-	//Il master deve aggiornare anche le repliche
-	if Master {
-		var request string = fileName + "|" + fileContent
-		requestJSON, _ := json.Marshal(request)
-		fmt.Println("I am the Datastore Master, so I am going to update with the request: " + request + " all the replicas:")
-		for pos, ds := range DSList {
-			go contactReplicas(ds, pos, requestJSON, "put") // Invio parallelo degli aggiornamenti put alle repliche
-		}
-	}
-	json.NewEncoder(w).Encode("The file was successfully uploaded.")
-}
-
-//Funzione utile all'implementazione del parallelismo di goroutines per la put
-func contactReplicas(ds string, pos int, requestJSON []byte, mode string) {
-	fmt.Println("Updating replica " + ds)
-	var response *http.Response
-	var err error
-	if mode == "put" {
-		response, err = http.Post("http://"+ds+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	if mode == "delete" {
-		response, err = http.Post("http://"+ds+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	if err != nil {
-		fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
-		reportDSCrash(ds)
-		removeDSFromList(pos)
-		return
-	}
-	responseFromDS, _ := ioutil.ReadAll(response.Body)
-	fmt.Println("The replica " + ds + " answered : " + string(responseFromDS))
-}
-
-//Funzione di utility per la rimozione di un Datastore dalla lista
-func removeDSFromList(posToRm int) {
-	if len(DSList) > 0 {
-		var temp []string
-		for p, s := range DSList {
-			if p != posToRm {
-				temp = append(temp, s)
-			}
-		}
-		mutex.Lock()
-		DSList = temp
-		mutex.Unlock()
-	}
-}
-
-//Use case: il client ha richiesto una operazione di delete
-func del(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "Application/json")
-	time.Sleep(2 * time.Second) //Simulazione della latenza
-	fileToRemove := analyzeRequest(r)
-	fmt.Println("A delete operation has been called: the requested file to remove is '" + fileToRemove + "'")
-	mutex.Lock()
-	err := os.Remove(fileToRemove) // Elimina il file
-	mutex.Unlock()
-	if err != nil {
-		fmt.Println("An error has occurred trying to delete the file.")
-		json.NewEncoder(w).Encode(string("The file you requested could not be removed."))
-		return
-	}
-	//Il master deve aggiornare anche le repliche
-	if Master {
-		var request string = fileToRemove
-		requestJSON, _ := json.Marshal(request)
-		fmt.Println("I am the Datastore Master, so I am going to remove the file '" + request + "' from all the replicas.")
-		for pos, ds := range DSList {
-			go contactReplicas(ds, pos, requestJSON, "delete")
-		}
-	}
-	json.NewEncoder(w).Encode("The file was successfully removed.")
-}
-
-//Use case: il client ha richiesto una get
-func get(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "Application/json")
-	time.Sleep(1 * time.Second) //Simulazione della latenza
-	params := mux.Vars(r)       //Acquisisci i parametri dalla richiesta
-	fmt.Println("get called: I wanna read on myself " + params["key"])
-	mutex.Lock()
-	data, err := ioutil.ReadFile(params["key"]) //Prova a leggere il file richiesto
-	mutex.Unlock()
-	if err != nil {
-		fmt.Println("An error has occurred reading the file.")
-		json.NewEncoder(w).Encode("The requested file does not exists.")
-		return
-	}
-	json.NewEncoder(w).Encode(string(data))
-}
-
-//Funzione che contatta il Discovery per avvisarlo del crash di un Datastore replica
-func reportDSCrash(dsCrashed string) {
-	var request string = dsCrashed
-	requestJSON, _ := json.Marshal(request)
-	fmt.Println("The datastore " + dsCrashed + " has crashed: reporting to Discovery...")
-	_, err := http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
-	for err != nil {
-		fmt.Println("Looks like the Discovery has crashed. Waitng for it to restart...")
-		time.Sleep(3 * time.Second)
-		_, err = http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
-	}
-}
+var DiscoveryIP = "172.17.0.2"       //Indirizzo del nodo discovery
+var Master bool = false              //Variabile che viene impostata a true solo dal datastore Master
+var DSList []string                  //Lista dei datastore mantenuta dal Master
+var MASTERip string = ""             //Ip del master, utilizzato dalle repliche che si connettono al sistema per allinearsi
+var mutex sync.Mutex                 //Mutex per agire sulle strutture dati condivise tra le diverse goroutine
+var latency = 500 * time.Millisecond //Variabile per la simulazione della latenza
 
 func main() {
 	register()
@@ -160,6 +34,169 @@ func main() {
 	router.HandleFunc("/addDs", addDs).Methods("POST")
 	router.HandleFunc("/removeDs", removeDs).Methods("POST")
 	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
+//Use case: il client vuole effettuare una put
+func put(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	time.Sleep(latency) //Latenza simulata per contattare il DS Master
+	receivedRequest := analyzeRequest(r)
+	var info []string = strings.Split(receivedRequest, "|") //Acquisisci cosa bisogna salvare dalla richiesta dell'API
+	var fileName string = info[0]
+	var fileContent string = info[1]
+	fmt.Println("A put operation has been called. File save request is  '" + fileName + "' = '" + fileContent + "'")
+	mutex.Lock() //Inizia ad effettuare operazioni che devono essere mutualmente esclusive
+	if _, err := os.Stat(fileName); err == nil {
+		json.NewEncoder(w).Encode("The requested file already exists.")
+		mutex.Unlock()
+		time.Sleep(latency)
+		return
+	}
+	err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Salva il file solo se non c'è già
+	mutex.Unlock()
+	if err != nil {
+		fmt.Println("An error has occurred trying to write the file. ")
+		json.NewEncoder(w).Encode("An error has occurred trying to write the file.")
+		time.Sleep(latency)
+		return
+	}
+
+	//Il master deve aggiornare anche le repliche
+	if Master {
+		var request string = fileName + "|" + fileContent
+		requestJSON, _ := json.Marshal(request)
+		fmt.Println("I am the Datastore Master, so I am going to update with the request: " + request + " all the replicas:")
+		for _, ds := range DSList {
+			go contactReplicas(ds, requestJSON, "put") // Invio parallelo degli aggiornamenti put alle repliche
+		}
+	}
+	time.Sleep(latency)
+	json.NewEncoder(w).Encode("The file was successfully uploaded.")
+}
+
+//Use case: il client ha richiesto una operazione di delete
+func del(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	time.Sleep(latency) //Simulazione della latenza
+	fileToRemove := analyzeRequest(r)
+	fmt.Println("A delete operation has been called: the requested file to remove is '" + fileToRemove + "'")
+	mutex.Lock()
+	err := os.Remove(fileToRemove) // Elimina il file
+	mutex.Unlock()
+	if err != nil {
+		fmt.Println("An error has occurred trying to delete the file.")
+		json.NewEncoder(w).Encode(string("The file you requested could not be removed."))
+		time.Sleep(latency)
+		return
+	}
+	//Il master deve aggiornare anche le repliche
+	if Master {
+		var request string = fileToRemove
+		requestJSON, _ := json.Marshal(request)
+		fmt.Println("I am the Datastore Master, so I am going to remove the file '" + request + "' from all the replicas.")
+		for _, ds := range DSList {
+			go contactReplicas(ds, requestJSON, "delete")
+		}
+	}
+	time.Sleep(latency)
+	json.NewEncoder(w).Encode("The file was successfully removed.")
+}
+
+//Funzione utile all'implementazione del parallelismo di goroutines per la put
+func contactReplicas(ds string, requestJSON []byte, mode string) { //caso put info contiene key:value, caso del contiene ds
+	fmt.Println("Updating replica " + ds)
+	var response *http.Response
+	var err error
+	time.Sleep(latency)
+	if mode == "put" {
+		response, err = http.Post("http://"+ds+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	if mode == "delete" {
+		response, err = http.Post("http://"+ds+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	if err != nil {
+		fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
+		reportDSCrash(ds)
+		removeDSFromList(ds)
+		return
+	}
+	responseFromDS, _ := ioutil.ReadAll(response.Body)
+	fmt.Println("The replica " + ds + " answered : " + string(responseFromDS))
+}
+
+//Use case: il client ha richiesto una get
+func get(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	time.Sleep(latency)   //Simulazione della latenza
+	params := mux.Vars(r) //Acquisisci i parametri dalla richiesta
+	fmt.Println("get called: I wanna read on myself " + params["key"])
+	mutex.Lock()
+	data, err := ioutil.ReadFile(params["key"]) //Prova a leggere il file richiesto
+	mutex.Unlock()
+	if err != nil {
+		fmt.Println("An error has occurred reading the file.")
+		json.NewEncoder(w).Encode("The requested file does not exists.")
+		time.Sleep(latency)
+		return
+	}
+	time.Sleep(latency)
+	json.NewEncoder(w).Encode(string(data))
+}
+
+//Funzione di registrazione al discovery
+func register() {
+	requestJSON, _ := json.Marshal("datastore")
+	fmt.Println("Datastore correctly initialized. Registering on Discovery node " + DiscoveryIP)
+	time.Sleep(latency)
+	response, err := http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
+	for err != nil { //Se fallisce riprova ogni 3 secondi
+		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node. Retrying...")
+		fmt.Println(err.Error())
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	responseFromDiscovery, _ := ioutil.ReadAll(response.Body)
+	if strings.Contains(string(responseFromDiscovery), "master") { //Il discovery potrebbe rispondere che ora la replica appena connessa è il master
+		becomeMaster(nil, nil)
+		acquireDSList(string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-6]))
+		return
+	}
+	//Se si arriva fino a qui, significa che si tratta della registrazione di una replica
+	resp := cleanResponse(responseFromDiscovery)
+	resp = strings.ReplaceAll(resp, "\"", "")
+	resp = strings.ReplaceAll(resp, "\\", "")
+	resp = strings.ReplaceAll(resp, "\n", "")
+	MASTERip = resp
+	getDataUntilNow() //La replica appena connessa richiede al master tutti i file per reallinearsi
+}
+
+//Funzione di utility per la rimozione di un Datastore dalla lista
+func removeDSFromList(dsToRm string) {
+	if len(DSList) > 0 {
+		var temp []string
+		for _, s := range DSList {
+			if s != dsToRm {
+				temp = append(temp, s)
+			}
+		}
+		mutex.Lock()
+		DSList = temp
+		mutex.Unlock()
+	}
+}
+
+//Funzione che contatta il Discovery per avvisarlo del crash di un Datastore replica
+func reportDSCrash(dsCrashed string) {
+	var request string = dsCrashed
+	requestJSON, _ := json.Marshal(request)
+	fmt.Println("The datastore " + dsCrashed + " has crashed: reporting to Discovery...")
+	time.Sleep(latency)
+	_, err := http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
+	for err != nil {
+		fmt.Println("Looks like the Discovery has crashed. Waitng for it to restart...")
+		time.Sleep(3 * time.Second)
+		_, err = http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
+	}
 }
 
 //Funzione per la rimozione di un datastore dalla lista, chiamabile dal Discovery
@@ -187,6 +224,8 @@ func removeDs(w http.ResponseWriter, r *http.Request) {
 func addDs(w http.ResponseWriter, r *http.Request) {
 	req := analyzeRequest(r)
 	req = strings.ReplaceAll(req, "\"", "")
+	fmt.Println("DS prima dell'addDS")
+	fmt.Println(DSList)
 	if !isInlist(req, DSList) {
 		mutex.Lock()
 		DSList = append(DSList, req)
@@ -217,32 +256,6 @@ func isInlist(e string, l []string) bool {
 		}
 	}
 	return false
-}
-
-//Funzione di registrazione al discovery
-func register() {
-	requestJSON, _ := json.Marshal("datastore")
-	fmt.Println("Datastore correctly initialized. Registering on Discovery node " + DiscoveryIP)
-	response, err := http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
-	for err != nil { //Se fallisce riprova ogni 3 secondi
-		fmt.Println("An error has occurred trying to estabilish a connection with the Discovery node. Retrying...")
-		fmt.Println(err.Error())
-		time.Sleep(3 * time.Second)
-		response, err = http.Post("http://"+DiscoveryIP+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	responseFromDiscovery, _ := ioutil.ReadAll(response.Body)
-	if strings.Contains(string(responseFromDiscovery), "master") { //Il discovery potrebbe rispondere che ora la replica appena connessa è il master
-		becomeMaster(nil, nil)
-		acquireDSList(string(responseFromDiscovery[1 : len(string(responseFromDiscovery))-6]))
-		return
-	}
-	//Se si arriva fino a qui, significa che si tratta della registrazione di una replica
-	resp := cleanResponse(responseFromDiscovery)
-	resp = strings.ReplaceAll(resp, "\"", "")
-	resp = strings.ReplaceAll(resp, "\\", "")
-	resp = strings.ReplaceAll(resp, "\n", "")
-	MASTERip = resp
-	getDataUntilNow() //La replica appena connessa richiede al master tutti i file per reallinearsi
 }
 
 //Funzione di utility per la pulizia delle stringhe
@@ -290,6 +303,7 @@ func flushLocalfiles() {
 //Funzione di reallineamento della replica appena unita al sistema
 func getDataUntilNow() {
 	flushLocalfiles()
+	time.Sleep(latency)
 	response, err := http.Get("http://" + MASTERip + ":8080/getData")
 	if err != nil {
 		fmt.Println("An error has occurred trying to acquire data from the Datasore Master")

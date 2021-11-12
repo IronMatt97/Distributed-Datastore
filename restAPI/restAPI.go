@@ -20,75 +20,17 @@ var DSMasterIP string = ""            //Indirizzo del Datastore Master, necessar
 var DSList []string                   //Lista dei Datastore, necessaria per le operazioni di get distribuite
 var mutex sync.Mutex                  //Mutex per l'utilizzo di strutture dati condivise tra le goroutine
 
-//Funzione per la scelta di un DS tra quelli presenti al fine di fare la get
-func chooseDS() string {
-	dsNum := len(DSList)
-	if dsNum == 0 {
-		response, _ := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Se risultano 0 DS, controlla se è stato rieletto un master
-		r, _ := ioutil.ReadAll(response.Body)
-		DSMasterIP = string(r)
-		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
-		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
-		if DSMasterIP != "" {
-			mutex.Lock()
-			DSList = append(DSList, DSMasterIP) //Se è tornato un master, riaggiungilo alla lista dei datastore
-			mutex.Unlock()
-		}
-		return DSMasterIP
-	}
-	n := rand.Intn(dsNum)
-	return DSList[n] //Ritorna il DS scelto tra quelli presenti
-}
-
-//Funzione che comunica al nodo discovery il crash del Datastore Master
-func reportDSMasterCrash() {
-	fmt.Println("Looks like the Master Datastore has crashed: this will be reported to the Discovery node.")
-	var request string = DSMasterIP
-	requestJSON, _ := json.Marshal(request)
-	_, err := http.Post("http://"+DiscoveryIP+":8080/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
-	for err != nil { //Riprova ogni 3 secondi se non riesce a contattare il Discovery
-		fmt.Println("The Discovery node is down at the moment. Waiting for it to restart...")
-		time.Sleep(3 * time.Second)
-		_, err = http.Post("http://"+DiscoveryIP+":8080/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	fmt.Println("The Discovery node has been correctly informed of the Master Datastore crash.")
-}
-
-//Funzione di utility che viene chiamata dal Discovery per informare questo nodo API dell'elezione di un nuovo DS Master
-func changeDSMasterOnCrash(w http.ResponseWriter, r *http.Request) {
-	DSMasterIP = analyzeRequest(r)
-	fmt.Println("A new Datastore Master has been elected, the new Master is " + DSMasterIP)
-}
-
-//Funzione che comunica al nodo discovery il crash di un Datastore
-func reportDSCrash(dsCrashed string) {
-	var request string = dsCrashed
-	requestJSON, _ := json.Marshal(request)
-	fmt.Println("The datastore " + dsCrashed + " has crashed: this will be reported to the Discovery node.")
-	_, err := http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
-	for err != nil {
-		fmt.Println("The Discovery node is down at the moment. Waiting for it to restart...")
-		time.Sleep(3 * time.Second)
-		_, err = http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	removeDSFromList(dsCrashed) //Rimuovi il Datasore dalla lista conosciuta
-	fmt.Println("The crashed Datastore has been removed from the list. The list is now:")
-	fmt.Println(DSList)
-}
-
-//Funzione di utility che rimuove un Datastore dalla lista
-func removeDSFromList(dsToRemove string) {
-	if len(DSList) > 0 {
-		var t []string
-		for _, ds := range DSList {
-			if ds != dsToRemove {
-				t = append(t, ds)
-			}
-		}
-		mutex.Lock()
-		DSList = t     //La lista è acceduta dalle diverse goroutine dei diversi client che potrebbero contattare la stessa api
-		mutex.Unlock() //Ha senso sincronizzare le letture e le scritture sulla struttura di dati condivisa
-	}
+func main() {
+	register()                //Registrazione al Discovery
+	router := mux.NewRouter() //Inizializzazione del router
+	router.HandleFunc("/get/{key}", get).Methods("GET")
+	router.HandleFunc("/put", put).Methods("POST") //handler/endpoint per ogni use case e per altre funzionalità utili
+	router.HandleFunc("/del", del).Methods("POST")
+	router.HandleFunc("/changeMaster", changeDSMasterOnCrash).Methods("POST")
+	router.HandleFunc("/whoIsMaster", whoIsMaster).Methods("POST")
+	router.HandleFunc("/addDs", addDs).Methods("POST")
+	router.HandleFunc("/removeDs", removeDs).Methods("POST")
+	log.Fatal(http.ListenAndServe(":8080", router)) //Listen and serve delle richieste sulla porta 8080
 }
 
 //Use case: il client vuole effettuare una get
@@ -199,69 +141,6 @@ func del(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(string(responseFromDS))
 }
 
-func main() {
-	register()                                     //Registrazione al Discovery
-	router := mux.NewRouter()                      //Inizializzazione del router
-	router.HandleFunc("/put", put).Methods("POST") //handler/endpoint per ogni use case e per altre funzionalità utili
-	router.HandleFunc("/get/{key}", get).Methods("GET")
-	router.HandleFunc("/del", del).Methods("POST")
-	router.HandleFunc("/changeMaster", changeDSMasterOnCrash).Methods("POST")
-	router.HandleFunc("/whoIsMaster", whoIsMaster).Methods("POST")
-	router.HandleFunc("/addDs", addDs).Methods("POST")
-	router.HandleFunc("/removeDs", removeDs).Methods("POST")
-	log.Fatal(http.ListenAndServe(":8080", router)) //Listen and serve delle richieste sulla porta 8080
-}
-
-//Funzione di utility per rimuovere un Datastore dalla lista
-func removeDs(w http.ResponseWriter, r *http.Request) {
-
-	req := analyzeRequest(r)
-	if !isInlist(req, DSList) {
-		return
-	}
-	//rimuovi il ds dalla lista
-	var t []string
-	for _, ds := range DSList {
-		if ds != req {
-			t = append(t, ds)
-		}
-	}
-	mutex.Lock()
-	DSList = t
-	mutex.Unlock()
-	fmt.Println("A Datastore has been removed. The resulting list is now: ")
-	fmt.Println(DSList)
-}
-
-//Funzione chiamata dal Discovery per aggiungere un nuovo Datastore alla lista
-func addDs(w http.ResponseWriter, r *http.Request) {
-	req := analyzeRequest(r)
-	if !isInlist(req, DSList) {
-		mutex.Lock()
-		DSList = append(DSList, req)
-		mutex.Unlock()
-	}
-	fmt.Println("A new Datastore joined the system. The list is now: ")
-	fmt.Println(DSList)
-}
-
-//Funzione di utility per vedere se una stringa appartiene alla lista
-func isInlist(e string, l []string) bool {
-	for _, elem := range l {
-		if strings.Compare(e, elem) == 0 {
-			return true
-		}
-	}
-	return false
-}
-
-//Funzione di recovery chiamata dal Datastore quando riparte per riaggiornarsi sullo stato del sistema
-func whoIsMaster(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "Application/json")
-	fmt.Println("Il discovery mi ha chiesto chi è il master, e per me è " + DSMasterIP)
-	json.NewEncoder(w).Encode(DSMasterIP)
-}
-
 //Funzione di registrazione al sistema
 func register() {
 	fmt.Println("API node initialized: starting the registration process...")
@@ -295,6 +174,127 @@ func register() {
 	fmt.Println("Registration process complete: the master is " + DSMasterIP)
 	fmt.Println("The Datastore list is: ")
 	fmt.Println(DSList)
+}
+
+//Funzione di utility che viene chiamata dal Discovery per informare questo nodo API dell'elezione di un nuovo DS Master
+func changeDSMasterOnCrash(w http.ResponseWriter, r *http.Request) {
+	DSMasterIP = analyzeRequest(r)
+	fmt.Println("A new Datastore Master has been elected, the new Master is " + DSMasterIP)
+}
+
+//Funzione di recovery chiamata dal Datastore quando riparte per riaggiornarsi sullo stato del sistema
+func whoIsMaster(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "Application/json")
+	fmt.Println("Il discovery mi ha chiesto chi è il master, e per me è " + DSMasterIP)
+	json.NewEncoder(w).Encode(DSMasterIP)
+}
+
+//Funzione chiamata dal Discovery per aggiungere un nuovo Datastore alla lista
+func addDs(w http.ResponseWriter, r *http.Request) {
+	req := analyzeRequest(r)
+	if !isInlist(req, DSList) {
+		mutex.Lock()
+		DSList = append(DSList, req)
+		mutex.Unlock()
+	}
+	fmt.Println("A new Datastore joined the system. The list is now: ")
+	fmt.Println(DSList)
+}
+
+//Funzione di utility per rimuovere un Datastore dalla lista
+func removeDs(w http.ResponseWriter, r *http.Request) {
+
+	req := analyzeRequest(r)
+	if !isInlist(req, DSList) {
+		return
+	}
+	//rimuovi il ds dalla lista
+	var t []string
+	for _, ds := range DSList {
+		if ds != req {
+			t = append(t, ds)
+		}
+	}
+	mutex.Lock()
+	DSList = t
+	mutex.Unlock()
+	fmt.Println("A Datastore has been removed. The resulting list is now: ")
+	fmt.Println(DSList)
+}
+
+//Funzione per la scelta di un DS tra quelli presenti al fine di fare la get
+func chooseDS() string {
+	dsNum := len(DSList)
+	if dsNum == 0 {
+		response, _ := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Se risultano 0 DS, controlla se è stato rieletto un master
+		r, _ := ioutil.ReadAll(response.Body)
+		DSMasterIP = string(r)
+		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
+		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
+		if DSMasterIP != "" {
+			mutex.Lock()
+			DSList = append(DSList, DSMasterIP) //Se è tornato un master, riaggiungilo alla lista dei datastore
+			mutex.Unlock()
+		}
+		return DSMasterIP
+	}
+	n := rand.Intn(dsNum)
+	return DSList[n] //Ritorna il DS scelto tra quelli presenti
+}
+
+//Funzione che comunica al nodo discovery il crash del Datastore Master
+func reportDSMasterCrash() {
+	fmt.Println("Looks like the Master Datastore has crashed: this will be reported to the Discovery node.")
+	var request string = DSMasterIP
+	requestJSON, _ := json.Marshal(request)
+	_, err := http.Post("http://"+DiscoveryIP+":8080/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
+	for err != nil { //Riprova ogni 3 secondi se non riesce a contattare il Discovery
+		fmt.Println("The Discovery node is down at the moment. Waiting for it to restart...")
+		time.Sleep(3 * time.Second)
+		_, err = http.Post("http://"+DiscoveryIP+":8080/dsMasterCrash", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	fmt.Println("The Discovery node has been correctly informed of the Master Datastore crash.")
+}
+
+//Funzione che comunica al nodo discovery il crash di un Datastore
+func reportDSCrash(dsCrashed string) {
+	var request string = dsCrashed
+	requestJSON, _ := json.Marshal(request)
+	fmt.Println("The datastore " + dsCrashed + " has crashed: this will be reported to the Discovery node.")
+	_, err := http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
+	for err != nil {
+		fmt.Println("The Discovery node is down at the moment. Waiting for it to restart...")
+		time.Sleep(3 * time.Second)
+		_, err = http.Post("http://"+DiscoveryIP+":8080/dsCrash", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	removeDSFromList(dsCrashed) //Rimuovi il Datasore dalla lista conosciuta
+	fmt.Println("The crashed Datastore has been removed from the list. The list is now:")
+	fmt.Println(DSList)
+}
+
+//Funzione di utility che rimuove un Datastore dalla lista
+func removeDSFromList(dsToRemove string) {
+	if len(DSList) > 0 {
+		var t []string
+		for _, ds := range DSList {
+			if ds != dsToRemove {
+				t = append(t, ds)
+			}
+		}
+		mutex.Lock()
+		DSList = t     //La lista è acceduta dalle diverse goroutine dei diversi client che potrebbero contattare la stessa api
+		mutex.Unlock() //Ha senso sincronizzare le letture e le scritture sulla struttura di dati condivisa
+	}
+}
+
+//Funzione di utility per vedere se una stringa appartiene alla lista
+func isInlist(e string, l []string) bool {
+	for _, elem := range l {
+		if strings.Compare(e, elem) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 //Funzione di utility per estrapolare la lista dei DS dalla risposta del discovery

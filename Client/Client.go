@@ -17,6 +17,25 @@ import (
 var APIaddress string = ""                 //L'indirizzo della API con la quale il client comunicherà
 var DiscoveryAddress string = "172.17.0.2" //L'inirizzo del Discovery
 
+func main() {
+	register()
+	for {
+		clientInit()              //Inizializza l'output
+		action := acquireString() //Acquisisci l'intento dell'utente
+		switch {                  //Esegui l'azione richiesta
+		case action == "1":
+			read()
+		case action == "2":
+			write()
+		case action == "3":
+			del()
+		default:
+			fmt.Println("Invalid input received. Restarting the program ...")
+		}
+		waitForNextAction() //Attendi che l'utente prema invio ...
+	}
+}
+
 //Use case: il client vuole leggere un file
 func read() {
 	fmt.Print("Name the file that you would like to read: ")
@@ -72,28 +91,10 @@ func del() {
 	fmt.Println(cleanResponse(responseFromAPI))
 }
 
-func main() {
-	register()
-	for {
-		clientInit()              //Inizializza l'output
-		action := acquireString() //Acquisisci l'intento dell'utente
-		switch {                  //Esegui l'azione richiesta
-		case action == "1":
-			read()
-		case action == "2":
-			write()
-		case action == "3":
-			del()
-		default:
-			fmt.Println("Invalid input received. Restarting the program ...")
-		}
-		waitForNextAction() //Attendi che l'utente prema invio ...
-	}
-}
-
 //Funzione di inizializzazione: il client contatta il discovery per conoscere l'API con la quale dovrà comunicare
 func register() {
 	fmt.Println("Client node initialized. Trying to contact the discovery service ...")
+	time.Sleep(500 * time.Millisecond)       //Latenza simulata
 	requestJSON, _ := json.Marshal("client") //Invia la richiesta di join al discovery
 	response, err := http.Post("http://"+DiscoveryAddress+":8080/register", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Riprova ogni 3 secondi in caso di errore
@@ -113,6 +114,7 @@ func register() {
 //Funzione necessaria per comunicare al discovery il crash dell'API in uso
 func apicrash() {
 	fmt.Println("Connecting to the discovery node to acquire a new API ...")
+	time.Sleep(500 * time.Millisecond)
 	requestJSON, _ := json.Marshal(APIaddress)
 	response, err := http.Post("http://"+DiscoveryAddress+":8080/apicrash", "application/json", bytes.NewBuffer(requestJSON))
 	for err != nil { //Se fallisce riprova ogni 3 secondi
