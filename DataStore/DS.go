@@ -102,28 +102,6 @@ func del(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode("The file was successfully removed.")
 }
 
-//Funzione utile all'implementazione del parallelismo di goroutines per la put
-func contactReplicas(ds string, requestJSON []byte, mode string) { //caso put info contiene key:value, caso del contiene ds
-	fmt.Println("Updating replica " + ds)
-	var response *http.Response
-	var err error
-	time.Sleep(latency)
-	if mode == "put" {
-		response, err = http.Post("http://"+ds+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	if mode == "delete" {
-		response, err = http.Post("http://"+ds+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
-	}
-	if err != nil {
-		fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
-		reportDSCrash(ds)
-		removeDSFromList(ds)
-		return
-	}
-	responseFromDS, _ := ioutil.ReadAll(response.Body)
-	fmt.Println("The replica " + ds + " answered : " + string(responseFromDS))
-}
-
 //Use case: il client ha richiesto una get
 func get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "Application/json")
@@ -168,6 +146,28 @@ func register() {
 	resp = strings.ReplaceAll(resp, "\n", "")
 	MASTERip = resp
 	getDataUntilNow() //La replica appena connessa richiede al master tutti i file per reallinearsi
+}
+
+//Funzione utile all'implementazione del parallelismo di goroutines per la put
+func contactReplicas(ds string, requestJSON []byte, mode string) { //caso put info contiene key:value, caso del contiene ds
+	fmt.Println("Updating replica " + ds)
+	var response *http.Response
+	var err error
+	time.Sleep(latency)
+	if mode == "put" {
+		response, err = http.Post("http://"+ds+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	if mode == "delete" {
+		response, err = http.Post("http://"+ds+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
+	}
+	if err != nil {
+		fmt.Println("An error has occurred trying to estabilish a connection with the replica.")
+		reportDSCrash(ds)
+		removeDSFromList(ds)
+		return
+	}
+	responseFromDS, _ := ioutil.ReadAll(response.Body)
+	fmt.Println("The replica " + ds + " answered : " + string(responseFromDS))
 }
 
 //Funzione di utility per la rimozione di un Datastore dalla lista
