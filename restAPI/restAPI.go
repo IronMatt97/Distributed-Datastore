@@ -46,15 +46,18 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Println("The get operation will query the file '" + params["key"] + "' on the Datastore " + ds)
 	response, err := http.Get("http://" + ds + ":8080/get/" + params["key"])
-	if err != nil { //Qualora il datastore fosse crashato nel frattempo
+	for err != nil { //Qualora il datastore fosse crashato nel frattempo
 		if ds == DSMasterIP {
 			removeDSFromList(DSMasterIP)
 			DSMasterIP = ""
 			reportDSMasterCrash()
-			return
+			time.Sleep(3 * time.Second)
+			response, err = http.Get("http://" + ds + ":8080/get/" + params["key"])
+			continue
 		}
 		reportDSCrash(ds)
-		return
+		time.Sleep(3 * time.Second)
+		response, err = http.Get("http://" + ds + ":8080/get/" + params["key"])
 	}
 	responseFromDS, _ := ioutil.ReadAll(response.Body)
 	json.NewEncoder(w).Encode(string(responseFromDS)) //Invia al client la risposta del Datastore
@@ -80,23 +83,22 @@ func put(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("A put operation has been called: the Client wants to write " + request + " on the Master Datastore " + DSMasterIP)
 	requestJSON, _ := json.Marshal(request)
 	response, err := http.Post("http://"+DSMasterIP+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
-	if err != nil {
+	for err != nil {
 		reportDSMasterCrash() //Se il Master è crashato
 		removeDSFromList(DSMasterIP)
 		DSMasterIP = ""
-		response, err := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Richiedi chi è il master
-		for err != nil {
+		resp, e := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil) //Richiedi chi è il master
+		for e != nil {
 			fmt.Println("The Discovery node has crashed. Waiting for it to come back...")
 			time.Sleep(3 * time.Second)
-			response, err = http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil)
-
+			resp, e = http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil)
 		}
-		r, _ := ioutil.ReadAll(response.Body)
+		r, _ := ioutil.ReadAll(resp.Body)
 		DSMasterIP = string(r)
 		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
 		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
-		json.NewEncoder(w).Encode("The Master Datastore has crashed. Please try again later.")
-		return
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+DSMasterIP+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDS, _ := ioutil.ReadAll(response.Body)
 	json.NewEncoder(w).Encode(string(responseFromDS))
@@ -119,23 +121,22 @@ func del(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("A delete operation has been called: the file to remove is '" + fileToRemove + "', on the Master Datastore " + DSMasterIP)
 	requestJSON, _ := json.Marshal(request)
 	response, err := http.Post("http://"+DSMasterIP+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
-	if err != nil {
+	for err != nil {
 		reportDSMasterCrash()
 		removeDSFromList(DSMasterIP)
 		DSMasterIP = ""
-		response, err := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil)
-		for err != nil {
+		resp, e := http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil)
+		for e != nil {
 			fmt.Println("Discovery crashato, aspetto che torna")
 			time.Sleep(3 * time.Second)
-			response, err = http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil)
-
+			resp, e = http.Post("http://"+DiscoveryIP+":8080/whoisMaster", "application/json", nil)
 		}
-		r, _ := ioutil.ReadAll(response.Body)
+		r, _ := ioutil.ReadAll(resp.Body)
 		DSMasterIP = string(r)
 		DSMasterIP = strings.ReplaceAll(DSMasterIP, "\"", "")
 		DSMasterIP = strings.Replace(DSMasterIP, "\n", "", -1)
-		json.NewEncoder(w).Encode("The Master Datastore has crashed. Please try again later.")
-		return
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+DSMasterIP+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromDS, _ := ioutil.ReadAll(response.Body)
 	json.NewEncoder(w).Encode(string(responseFromDS))

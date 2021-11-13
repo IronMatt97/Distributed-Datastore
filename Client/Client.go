@@ -41,10 +41,11 @@ func read() {
 	fmt.Print("Name the file that you would like to read: ")
 	fileToRead := acquireString()                                                 //Acquisisci il titolo del file dall'utente
 	response, err := http.Get("http://" + APIaddress + ":8080/get/" + fileToRead) //Invia la richiesta all'API
-	if err != nil {
+	for err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		apicrash() //Informa il Discovery del crash dell'API
-		return
+		time.Sleep(3 * time.Second)
+		response, err = http.Get("http://" + APIaddress + ":8080/get/" + fileToRead)
 	}
 	responseFromAPI, _ := ioutil.ReadAll(response.Body) //Ottieni la risposta dall'API
 	fmt.Println(cleanResponse(responseFromAPI))         //Scrivi in output il contenuto del file richiesto
@@ -64,10 +65,11 @@ func write() {
 	}
 	requestJSON, _ := json.Marshal(fileName + "|" + fileContent) //Costruisci la richiesta all'API nel formato atteso
 	response, err := http.Post("http://"+APIaddress+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
-	if err != nil {
+	for err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		apicrash()
-		return
+		time.Sleep(3 * time.Second)
+		response, err = http.Post("http://"+APIaddress+":8080/put", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromAPI, _ := ioutil.ReadAll(response.Body)
 	fmt.Println(cleanResponse(responseFromAPI))
@@ -85,7 +87,7 @@ func del() {
 	if err != nil {
 		fmt.Println("An error has occurred trying to estabilish a connection with the API.")
 		apicrash()
-		return
+		response, err = http.Post("http://"+APIaddress+":8080/del", "application/json", bytes.NewBuffer(requestJSON))
 	}
 	responseFromAPI, _ := ioutil.ReadAll(response.Body)
 	fmt.Println(cleanResponse(responseFromAPI))
