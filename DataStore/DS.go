@@ -235,7 +235,7 @@ func addDs(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(DSList)
 }
 
-//Funzione chiamabile dal Discovery per l'elezione de Master
+//Funzione chiamabile dal Discovery per l'elezione del Master
 func becomeMaster(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("|-----------------|")
 	fmt.Println("| I AM THE MASTER |")
@@ -288,7 +288,7 @@ func flushLocalfiles() {
 		log.Fatal(err)
 	}
 	for _, file := range files {
-		if strings.Compare(file.Name(), "DS") != 0 && strings.Compare(file.Name(), "DS.go") != 0 {
+		if strings.Compare(file.Name(), "DS_test.go") != 0 && strings.Compare(file.Name(), "DS.go") != 0 {
 			mutex.Lock()
 			err := os.Remove(file.Name()) // Rimuovi tutti i file tranne l'eseguibile
 			mutex.Unlock()
@@ -372,7 +372,7 @@ func prepareDataList() string {
 	}
 	var list string
 	for _, file := range files {
-		if strings.Compare(file.Name(), "DS") != 0 && strings.Compare(file.Name(), "DS.go") != 0 {
+		if strings.Compare(file.Name(), "DS_test.go") != 0 && strings.Compare(file.Name(), "DS.go") != 0 {
 			mutex.Lock()
 			fileContent, _ := ioutil.ReadFile(file.Name())
 			mutex.Unlock()

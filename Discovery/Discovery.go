@@ -328,7 +328,7 @@ func checkForPrevState() {
 		log.Fatal(err)
 	}
 	for _, file := range files { //Riacquisisci le liste precedentemente salvate in locale, così da recuperare lo stato del sistema.
-		if file.Name() != "Discovery.go" {
+		if file.Name() != "Discovery.go" && file.Name() != "Discovery_test.go" {
 			fmt.Println("I found already someone in the system: " + file.Name())
 		}
 		if strings.Contains(file.Name(), "DS-") {
