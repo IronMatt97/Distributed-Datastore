@@ -45,14 +45,8 @@ func put(w http.ResponseWriter, r *http.Request) {
 	var fileName string = info[0]
 	var fileContent string = info[1]
 	fmt.Println("A put operation has been called. File save request is  '" + fileName + "' = '" + fileContent + "'")
-	mutex.Lock() //Inizia ad effettuare operazioni che devono essere mutualmente esclusive
-	if _, err := os.Stat(fileName); err == nil {
-		json.NewEncoder(w).Encode("The requested file already exists.")
-		mutex.Unlock()
-		time.Sleep(latency)
-		return
-	}
-	err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Salva il file solo se non c'è già
+	mutex.Lock()                                                 //Inizia ad effettuare operazioni che devono essere mutualmente esclusive
+	err := ioutil.WriteFile(fileName, []byte(fileContent), 0777) //Salva il file eventualmente sovrascrivendolo
 	mutex.Unlock()
 	if err != nil {
 		fmt.Println("An error has occurred trying to write the file. ")
