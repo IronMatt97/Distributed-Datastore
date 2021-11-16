@@ -7,6 +7,7 @@ Guida per l'avvio della demo:
 1. Spostarsi nella cartella Install&Run (cd Install&Run)
 2. Eseguire lo script di installazione (./install.sh)
 3. Eseguire lo script di avvio (./run.sh [numeroDatastore] [numeroAPI])
+4. NOTA: Qualora non si avesse a disposizione il terminale chiamato Konsole (di Kubuntu), lo script di avvio non funzionerà e basterà sostituire nello script la stringa "konsole" con la stringa del proprio terminale preferito. In alternativa basta avviare manualmente i container, con i comandi docker run -it [NomeImmagine] (i nomi immagine preinstallati dal primo script saranno client, api, datastore e discovery, verificabile con il comando docker image ls)
 
 A questo punto si potrà utilizzare il nodo client per effettuare delle richieste al sistema, seguendo la guida che comparirà a schermo.
 
