@@ -15,7 +15,7 @@ Note aggiuntive:
 Qualora si voglia testare il sistema in maniera approfondita è stato lasciato un Dockerfile nella certella NodeInspector_Dockerfile.
 Utilizzando quest'ultimo è possibile creare un'immagine in grado di simulare qualsiasi nodo con una connessione ssh attiva instaurata, così da avere maggior libertà di gestione.
 Guida alla modalità di ispezione:
-1. Spostarsi nella cartella NodeInspector_Dockerfile (cd NodeInspector_Dockerfile)
+1. Spostarse il dockerfile dalla cartella NodeInspector_Dockerfile alla cartella prima, ovvero Progetto-SDCC(mv NodeInspector_Dockerfile ../), per poi spostarsi nella cartella dove è stato messo il dockerfile.
 2. Richiedere a Docker di creare l'immagine (docker build --tag node .)
 3. Avviare un numero di container a piacere (docker run -it node)
 

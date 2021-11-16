@@ -21,7 +21,11 @@ RUN sed -i 's/#*PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ss
 RUN service ssh start
 
 #Copy go file
-COPY ../* ./SDCC/
+COPY /Client/Client.go ./SDCC/Client/
+COPY /DataStore/DS.go ./SDCC/DS/
+COPY /restAPI/restAPI.go ./SDCC/api/
+COPY /Discovery/Discovery.go ./SDCC/Discovery/
+
 
 EXPOSE 8080
 EXPOSE 22

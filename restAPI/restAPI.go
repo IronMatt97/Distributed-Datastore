@@ -52,11 +52,13 @@ func get(w http.ResponseWriter, r *http.Request) {
 			DSMasterIP = ""
 			reportDSMasterCrash()
 			time.Sleep(3 * time.Second)
+			ds := chooseDS()
 			response, err = http.Get("http://" + ds + ":8080/get/" + params["key"])
 			continue
 		}
 		reportDSCrash(ds)
 		time.Sleep(3 * time.Second)
+		ds := chooseDS()
 		response, err = http.Get("http://" + ds + ":8080/get/" + params["key"])
 	}
 	responseFromDS, _ := ioutil.ReadAll(response.Body)
